@@ -1,0 +1,9 @@
+# Python artifacts anywhere in the voicemap/ subtree
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Package secrets (covers voicemap/*/.env too)
+.env
+.env.local

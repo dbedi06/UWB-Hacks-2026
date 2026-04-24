@@ -1,34 +1,32 @@
-"""Configuration loaded from environment variables.
+"""Backend configuration: paths, CORS, feature flags, audio constants.
 
-`.env` is auto-loaded from the current working directory. Required env
-vars raise KeyError at import time — failing loudly is the right
-behavior for a boot-time misconfiguration.
+OpenAI settings live in voicemap/ai/config.py — the AI pipeline and the
+backend are separate packages per the project structure on main.
+
+`.env` is loaded from voicemap/backend/.env regardless of cwd.
 """
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
-# ─── Required ─────────────────────────────────────────────────────────
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
-
-# ─── Optional (with defaults) ─────────────────────────────────────────
-OPENAI_TRANSCRIPTION_MODEL = os.getenv("OPENAI_TRANSCRIPTION_MODEL", "whisper-1")
-OPENAI_EXTRACTION_MODEL = os.getenv("OPENAI_EXTRACTION_MODEL", "gpt-4o-2024-08-06")
-
+# ─── Paths ────────────────────────────────────────────────────────────
 REPORTS_JSON_PATH = os.getenv("REPORTS_JSON_PATH", "data/reports.json")
 
+# ─── Feature flags ────────────────────────────────────────────────────
 MOCK_MODE = os.getenv("MOCK_MODE", "false").lower() == "true"
 
+# ─── CORS ─────────────────────────────────────────────────────────────
 ALLOWED_ORIGINS = [
     o.strip() for o in os.getenv(
         "ALLOWED_ORIGINS", "http://localhost:3000"
     ).split(",") if o.strip()
 ]
 
-# ─── Constants ────────────────────────────────────────────────────────
-MAX_AUDIO_BYTES = 5 * 1024 * 1024           # 5 MB
-MIN_AUDIO_BYTES = 1_000                      # 1 KB
+# ─── Audio constants ──────────────────────────────────────────────────
+MAX_AUDIO_BYTES = 5 * 1024 * 1024            # 5 MB
+MIN_AUDIO_BYTES = 1_000                       # 1 KB
 MIN_TRANSCRIPT_CHARS = 5
 MAX_REPORTS_PER_REQUEST = 1000
 

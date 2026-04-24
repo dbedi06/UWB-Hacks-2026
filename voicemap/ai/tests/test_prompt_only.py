@@ -3,18 +3,12 @@
 No audio, no FastAPI, no DB. Run this first when iterating on the
 system prompt:
 
-    cd voicemap/backend
-    source venv/bin/activate
-    python -m tests.test_prompt_only
+    source voicemap/backend/venv/bin/activate
+    python -m voicemap.ai.tests.test_prompt_only
 """
 import asyncio
-import sys
-from pathlib import Path
 
-# Allow running as `python -m tests.test_prompt_only` from voicemap/backend/
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from services.extraction import extract_report_from_text  # noqa: E402
+from voicemap.ai.extraction import extract_report_from_text
 
 
 SAMPLES = [

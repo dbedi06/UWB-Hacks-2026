@@ -1,57 +1,14 @@
-"""Pydantic models for the VoiceMap API.
+"""API-level Pydantic models — wire format between backend and clients.
 
-These are the single source of truth for the wire format exchanged with
-the frontend and for the structured output extracted by OpenAI.
+The LLM output schema (ExtractedReport) lives in voicemap/ai/models.py.
+These models describe what the REST API returns, not what the LLM
+produces.
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Literal, Optional
 
 
-Category = Literal[
-    "pothole",
-    "streetlight",
-    "crosswalk_traffic",
-    "sidewalk",
-    "graffiti_vandalism",
-    "trash_dumping",
-    "water_sewer",
-    "trees_vegetation",
-    "noise",
-    "stray_animal",
-    "encampment",
-    "other",
-]
-
-Severity = Literal["low", "medium", "high", "emergency"]
 Status = Literal["open", "acknowledged", "resolved", "flagged"]
-
-
-class ExtractedReport(BaseModel):
-    """The structured output we expect from the LLM.
-
-    Also used as the `response_format` schema for OpenAI's structured
-    outputs, so every field needs to be representable in strict JSON
-    Schema (Literal, str, list[str], float with bounds).
-    """
-    transcript: str = Field(description="Verbatim transcription of the audio")
-    category: Category
-    severity: Severity
-    specific_location: str = Field(
-        default="",
-        description="Street, intersection, or address mentioned; empty if none",
-    )
-    duration: str = Field(
-        default="",
-        description="How long the issue has existed; empty if not mentioned",
-    )
-    tags: list[str] = Field(
-        default_factory=list,
-        description="snake_case descriptive tags, e.g. ['near_school', 'child_safety']",
-    )
-    impact_summary: str = Field(
-        description="One sentence preserving reporter's context and stakes"
-    )
-    confidence: float = Field(ge=0.0, le=1.0)
 
 
 class LocationOut(BaseModel):
@@ -61,7 +18,7 @@ class LocationOut(BaseModel):
 
 
 class ReportResponse(BaseModel):
-    """What the API returns to clients."""
+    """What the API returns to clients for a single report."""
     id: str
     transcript: str
     report: dict

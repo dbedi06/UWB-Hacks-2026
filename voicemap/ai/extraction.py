@@ -10,9 +10,9 @@ blocked during the (potentially multi-second) network round-trip.
 """
 from openai import AsyncOpenAI, OpenAIError
 
-from models import ExtractedReport
-from prompts.extract import SYSTEM_PROMPT
-import config
+from voicemap.ai.models import ExtractedReport
+from voicemap.ai.prompts.extract import SYSTEM_PROMPT
+from voicemap.ai import config
 
 
 _client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
