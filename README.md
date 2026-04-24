@@ -1,107 +1,36 @@
-# 🗺️ VoiceMap
-**Turn individual complaints into collective action.**
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
 
-VoiceMap is a civic infrastructure reporting platform where community members can submit issues (potholes, broken streetlights, unsafe crosswalks, etc.) via text and photo. AI clusters overlapping reports into structured, prioritized issue cards — then surfaces them on a live map for both residents and city officials to act on.
+## Getting Started
 
----
-
-## 🚀 Features
-
-- **Report Submission** — Submit infrastructure issues with text descriptions, photos, and automatic geolocation
-- **AI-Powered Clustering** — Google Gemini groups nearby, related reports into single confirmed issue cards with severity scores
-- **Live Issue Map** — Color-coded map pins showing active issues by severity, updated in real time
-- **Two-Tier Output** — A public community map and auto-generated reports for the relevant city department
-- **Alert Subscriptions** — Get SMS/email notifications when new issues appear near a location you care about
-- **Emergency Routing** — Severity-flagged reports trigger a prompt to call 911 rather than routing through the app
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Frontend | Next.js |
-| Map | Leaflet.js / Mapbox |
-| Backend |  |
-| Database | DigitalOcean Managed PostgreSQL |
-| AI | OpenAI Whisper + GPT-4o  (text extraction + vision) |
-| Notifications | Twilio (SMS) / SendGrid (email) |
-| Hosting | Vercel (frontend), Render (backend) |
-
----
-
-## 📁 Project Structure
-
-```
-voicemap/
-├── frontend/        # Next.js app, map UI, submission form
-├── backend/         # REST API, auth, notification logic
-├── ai/              # Gemini pipeline, clustering logic
-└── README.md
-```
-
----
-
-## ⚙️ Getting Started
-
-### Prerequisites
-- Node.js v18+
-- A DigitalOcean PostgreSQL database
-- Google Gemini API key
-- Twilio or SendGrid account (for notifications)
-
-### Installation
+First, run the development server:
 
 ```bash
-# Clone the repo
-git clone https://github.com/your-org/voicemap.git
-cd voicemap
-
-# Install dependencies
-npm install
-
-# Set up environment variables
-cp .env.example .env.local
-# Fill in your API keys and DB connection string
-
-# Run locally
 npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
 ```
 
-### Environment Variables
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-```bash
-GEMINI_API_KEY=your-gemini-api-key
-DATABASE_URL=your-digitalocean-postgres-url
-TWILIO_ACCOUNT_SID=your-twilio-sid
-TWILIO_AUTH_TOKEN=your-twilio-token
-NEXT_PUBLIC_MAPBOX_TOKEN=your-mapbox-token   # if using Mapbox
-```
+You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
 
----
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-## 🗄️ Data Model (Overview)
+## Learn More
 
-| Table | Purpose |
-|---|---|
-| `users` | Registered accounts |
-| `reports` | Raw individual submissions |
-| `clusters` | AI-merged issue groups shown on the map |
-| `subscriptions` | Alert preferences per user |
+To learn more about Next.js, take a look at the following resources:
 
----
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
 
-## 👥 Team
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-| Name | Role |
-|---|---|
-| **Jad** | Frontend & Map |
-| **Abenezer** | Backend, Database & Notifications |
-| **Leo** | AI Pipeline & LLM Integration |
-| **Dilshan** | Pitch, Demo & Full-Stack Support |
+## Deploy on Vercel
 
----
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
-## 📄 License
-
-MIT
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
