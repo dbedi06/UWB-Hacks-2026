@@ -24,7 +24,7 @@ VoiceMap is a civic infrastructure reporting platform where community members ca
 | Map | Leaflet.js / Mapbox |
 | Backend | Node.js (REST API) |
 | Database | DigitalOcean Managed PostgreSQL |
-| AI | Google Gemini (text extraction + vision) |
+| AI | OpenAI Whisper + GPT-4o  (text extraction + vision) |
 | Notifications | Twilio (SMS) / SendGrid (email) |
 | Hosting | Vercel (frontend), Render (backend) |
 
