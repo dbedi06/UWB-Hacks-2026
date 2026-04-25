@@ -4,19 +4,19 @@ import { useEffect, useRef, useState, useCallback } from "react";
 
 // ─── Category config ────────────────────────────────────────────────────────
 const CATEGORIES = {
-  pothole:      { label: "Pothole",          color: "#E07B39", icon: "🕳️" },
-  streetlight:  { label: "Streetlight",      color: "#F5C842", icon: "💡" },
-  crosswalk:    { label: "Crosswalk",        color: "#4A9EE0", icon: "🚶" },
-  graffiti:     { label: "Graffiti",         color: "#9B6DD6", icon: "🎨" },
-  flooding:     { label: "Flooding",         color: "#3BBFA3", icon: "💧" },
-  debris:       { label: "Debris/Hazard",    color: "#D45F5F", icon: "⚠️" },
-  other:        { label: "Other",            color: "#8A8A8A", icon: "📍" },
+  pothole: { label: "Pothole", color: "#E07B39", icon: "🕳️" },
+  streetlight: { label: "Streetlight", color: "#F5C842", icon: "💡" },
+  crosswalk: { label: "Crosswalk", color: "#4A9EE0", icon: "🚶" },
+  graffiti: { label: "Graffiti", color: "#9B6DD6", icon: "🎨" },
+  flooding: { label: "Flooding", color: "#3BBFA3", icon: "💧" },
+  debris: { label: "Debris/Hazard", color: "#D45F5F", icon: "⚠️" },
+  other: { label: "Other", color: "#8A8A8A", icon: "📍" },
 };
 
 const SEVERITIES = {
-  low:       { label: "Low",       color: "#3BBFA3", ring: 8  },
-  medium:    { label: "Medium",    color: "#F5C842", ring: 11 },
-  high:      { label: "High",      color: "#E07B39", ring: 14 },
+  low: { label: "Low", color: "#3BBFA3", ring: 8 },
+  medium: { label: "Medium", color: "#F5C842", ring: 11 },
+  high: { label: "High", color: "#E07B39", ring: 14 },
   emergency: { label: "Emergency", color: "#D45F5F", ring: 18 },
 };
 
@@ -25,18 +25,18 @@ const BOTHELL_CENTER = [47.7623, -122.2054];
 
 // ─── Seeded demo reports ─────────────────────────────────────────────────────
 const SEED_REPORTS = [
-  { id: "s1",  lat: 47.7651, lng: -122.2048, category: "pothole",     severity: "high",      title: "Large pothole on 228th St SE",          impact_summary: "Dangerous for cyclists and vehicles, near school zone.", created_at: "2025-04-20T08:12:00Z" },
-  { id: "s2",  lat: 47.7602, lng: -122.2071, category: "streetlight", severity: "medium",    title: "Streetlight out at Main St & 102nd Ave", impact_summary: "Dark intersection, residents concerned about safety at night.", created_at: "2025-04-21T19:45:00Z" },
-  { id: "s3",  lat: 47.7588, lng: -122.2010, category: "crosswalk",   severity: "high",      title: "Faded crosswalk on Bothell Way NE",      impact_summary: "Nearly invisible markings, kids cross daily for school.", created_at: "2025-04-18T07:30:00Z" },
-  { id: "s4",  lat: 47.7671, lng: -122.2090, category: "flooding",    severity: "medium",    title: "Drainage backup near Canyon Park",       impact_summary: "Standing water after rain, blocks sidewalk access.", created_at: "2025-04-22T11:00:00Z" },
-  { id: "s5",  lat: 47.7634, lng: -122.1988, category: "debris",      severity: "low",       title: "Tree branch on bike path",               impact_summary: "Fallen limb partially blocks trail near Sammamish River.", created_at: "2025-04-23T15:20:00Z" },
-  { id: "s6",  lat: 47.7558, lng: -122.2055, category: "graffiti",    severity: "low",       title: "Graffiti on underpass wall",             impact_summary: "Spray paint on SR-522 underpass, visible from roadway.", created_at: "2025-04-19T09:00:00Z" },
-  { id: "s7",  lat: 47.7700, lng: -122.2035, category: "pothole",     severity: "medium",    title: "Pothole cluster on 240th St",            impact_summary: "Multiple potholes, reported by 3 residents.", created_at: "2025-04-17T14:00:00Z" },
-  { id: "s8",  lat: 47.7615, lng: -122.2120, category: "streetlight", severity: "high",      title: "3 streetlights out on 195th Pl NE",      impact_summary: "Entire block dark, break-ins reported nearby.", created_at: "2025-04-20T20:10:00Z" },
-  { id: "s9",  lat: 47.7645, lng: -122.1965, category: "crosswalk",   severity: "medium",    title: "No crosswalk signal at trail crossing",  impact_summary: "Pedestrians crossing SR-522 with no signal protection.", created_at: "2025-04-21T08:45:00Z" },
-  { id: "s10", lat: 47.7580, lng: -122.2095, category: "debris",      severity: "high",      title: "Shopping cart blocking storm drain",     impact_summary: "Drain fully blocked, flooding risk during rain.", created_at: "2025-04-22T16:30:00Z" },
-  { id: "s11", lat: 47.7722, lng: -122.2070, category: "pothole",     severity: "low",       title: "Small pothole on 244th St SE",           impact_summary: "Minor but growing, reported before winter.", created_at: "2025-04-16T10:00:00Z" },
-  { id: "s12", lat: 47.7596, lng: -122.1999, category: "flooding",    severity: "high",      title: "Intersection floods every rainstorm",    impact_summary: "Corner of Bothell Way & 102nd Ave NE, cars stall.", created_at: "2025-04-15T13:20:00Z" },
+  { id: "s1", lat: 47.7651, lng: -122.2048, category: "pothole", severity: "high", title: "Large pothole on 228th St SE", location_description: "228th St SE near school zone", impact_summary: "Dangerous for cyclists and vehicles, near school zone.", report_count: 4, status: "open", created_at: "2025-04-20T08:12:00Z" },
+  { id: "s2", lat: 47.7602, lng: -122.2071, category: "streetlight", severity: "medium", title: "Streetlight out at Main St & 102nd Ave", location_description: "Main St & 102nd Ave NE intersection", impact_summary: "Dark intersection, residents concerned about safety at night.", report_count: 2, status: "open", created_at: "2025-04-21T19:45:00Z" },
+  { id: "s3", lat: 47.7588, lng: -122.2010, category: "crosswalk", severity: "high", title: "Faded crosswalk on Bothell Way NE", location_description: "Bothell Way NE near elementary school", impact_summary: "Nearly invisible markings, kids cross daily for school.", report_count: 6, status: "open", created_at: "2025-04-18T07:30:00Z" },
+  { id: "s4", lat: 47.7671, lng: -122.2090, category: "flooding", severity: "medium", title: "Drainage backup near Canyon Park", location_description: "Canyon Park entrance, north parking lot", impact_summary: "Standing water after rain, blocks sidewalk access.", report_count: 3, status: "open", created_at: "2025-04-22T11:00:00Z" },
+  { id: "s5", lat: 47.7634, lng: -122.1988, category: "debris", severity: "low", title: "Tree branch on bike path", location_description: "Sammamish River Trail, mile marker 7", impact_summary: "Fallen limb partially blocks trail near Sammamish River.", report_count: 1, status: "open", created_at: "2025-04-23T15:20:00Z" },
+  { id: "s6", lat: 47.7558, lng: -122.2055, category: "graffiti", severity: "low", title: "Graffiti on underpass wall", location_description: "SR-522 underpass, westbound side", impact_summary: "Spray paint on SR-522 underpass, visible from roadway.", report_count: 1, status: "open", created_at: "2025-04-19T09:00:00Z" },
+  { id: "s7", lat: 47.7700, lng: -122.2035, category: "pothole", severity: "medium", title: "Pothole cluster on 240th St", location_description: "240th St SE between 35th and 39th Ave", impact_summary: "Multiple potholes, reported by 3 residents.", report_count: 3, status: "open", created_at: "2025-04-17T14:00:00Z" },
+  { id: "s8", lat: 47.7615, lng: -122.2120, category: "streetlight", severity: "high", title: "3 streetlights out on 195th Pl NE", location_description: "195th Pl NE, full block between 2nd and 4th", impact_summary: "Entire block dark, break-ins reported nearby.", report_count: 5, status: "open", created_at: "2025-04-20T20:10:00Z" },
+  { id: "s9", lat: 47.7645, lng: -122.1965, category: "crosswalk", severity: "medium", title: "No crosswalk signal at trail crossing", location_description: "SR-522 trail crossing near Riverside Dr", impact_summary: "Pedestrians crossing SR-522 with no signal protection.", report_count: 2, status: "open", created_at: "2025-04-21T08:45:00Z" },
+  { id: "s10", lat: 47.7580, lng: -122.2095, category: "debris", severity: "high", title: "Shopping cart blocking storm drain", location_description: "Storm drain on 98th Ave NE near QFC", impact_summary: "Drain fully blocked, flooding risk during rain.", report_count: 2, status: "open", created_at: "2025-04-22T16:30:00Z" },
+  { id: "s11", lat: 47.7722, lng: -122.2070, category: "pothole", severity: "low", title: "Small pothole on 244th St SE", location_description: "244th St SE near cul-de-sac", impact_summary: "Minor but growing, reported before winter.", report_count: 1, status: "open", created_at: "2025-04-16T10:00:00Z" },
+  { id: "s12", lat: 47.7596, lng: -122.1999, category: "flooding", severity: "high", title: "Intersection floods every rainstorm", location_description: "Bothell Way & 102nd Ave NE corner", impact_summary: "Corner of Bothell Way & 102nd Ave NE, cars stall.", report_count: 7, status: "open", created_at: "2025-04-15T13:20:00Z" },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -65,33 +65,115 @@ function createPinSVG(category, severity, count = null) {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function VoiceMap() {
-  const mapRef      = useRef(null);
-  const leafletRef  = useRef(null);
-  const markersRef  = useRef({});
-  const [reports, setReports]         = useState(SEED_REPORTS);
-  const [selected, setSelected]       = useState(null);
-  const [panelOpen, setPanelOpen]     = useState(false);
-  const [form, setForm]               = useState({ title: "", category: "pothole", severity: "medium", impact_summary: "" });
+  const mapRef = useRef(null);
+  const leafletRef = useRef(null);
+  const markersRef = useRef({});
+  const [reports, setReports] = useState(SEED_REPORTS);
+  const [selected, setSelected] = useState(null);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [form, setForm] = useState({ title: "", category: "pothole", other_type: "", severity: "medium", location_description: "", impact_summary: "" });
   const [clickedLatLng, setClickedLatLng] = useState(null);
-  const [recording, setRecording]     = useState(false);
-  const [transcript, setTranscript]   = useState("");
+  const [recording, setRecording] = useState(false);
+  const [transcript, setTranscript] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [filter, setFilter]           = useState({ category: "all", severity: "all" });
-  const [mapReady, setMapReady]       = useState(false);
+  const [filter, setFilter] = useState({ category: "all", severity: "all" });
+  const [mapReady, setMapReady] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [geoLocation, setGeoLocation] = useState(null);
+  const [geoError, setGeoError] = useState(false);
+  const [alertPrefs, setAlertPrefs] = useState({ enabled: false, radius: 1, minSeverity: "medium" });
+
+  // ── Auth state ────────────────────────────────────────────────────────────
+  const [user, setUser] = useState(null); // null = logged out
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState("login"); // "login" | "signup"
+  const [authForm, setAuthForm] = useState({ username: "", password: "", email: "", phone: "" });
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+
   const mediaRecorderRef = useRef(null);
-  const recognitionRef   = useRef(null);
+  const recognitionRef = useRef(null);
+  const userRef = useRef(null);
+  useEffect(() => { userRef.current = user; }, [user]);
+
+  // ── Auth handlers — swap fetch URLs for real backend endpoints ────────────
+  const handleLogin = async () => {
+    if (!authForm.username || !authForm.password) { setAuthError("Please enter your username and password."); return; }
+    setAuthLoading(true); setAuthError("");
+    try {
+      // ── BACKEND HOOK: replace with real API call ──
+      // const res = await fetch("/api/auth/login", {
+      //   method: "POST",
+      //   headers: { "Content-Type": "application/json" },
+      //   body: JSON.stringify({ username: authForm.username, password: authForm.password }),
+      // });
+      // const data = await res.json();
+      // if (!res.ok) throw new Error(data.message || "Login failed");
+      // setUser(data.user);  // expects: { id, username, email, phone }
+
+      // ── MOCK (remove when backend is ready) ──
+      await new Promise(r => setTimeout(r, 600));
+      setUser({ id: "u1", username: authForm.username, email: authForm.email || "", phone: authForm.phone || "" });
+      setAuthOpen(false);
+      setAuthForm({ username: "", password: "", email: "", phone: "" });
+    } catch (e) {
+      setAuthError(e.message);
+    } finally { setAuthLoading(false); }
+  };
+
+  const handleSignup = async () => {
+    if (!authForm.username || !authForm.password) { setAuthError("Username and password are required."); return; }
+    if (!authForm.email && !authForm.phone) { setAuthError("Please provide at least an email or phone number."); return; }
+    setAuthLoading(true); setAuthError("");
+    try {
+      // ── BACKEND HOOK: replace with real API call ──
+      // const res = await fetch("/api/auth/register", {
+      //   method: "POST",
+      //   headers: { "Content-Type": "application/json" },
+      //   body: JSON.stringify({
+      //     username: authForm.username,
+      //     password: authForm.password,
+      //     email:    authForm.email || null,
+      //     phone:    authForm.phone || null,
+      //   }),
+      // });
+      // const data = await res.json();
+      // if (!res.ok) throw new Error(data.message || "Signup failed");
+      // setUser(data.user);  // expects: { id, username, email, phone }
+
+      // ── MOCK (remove when backend is ready) ──
+      await new Promise(r => setTimeout(r, 600));
+      setUser({ id: "u1", username: authForm.username, email: authForm.email, phone: authForm.phone });
+      setAuthOpen(false);
+      setAuthForm({ username: "", password: "", email: "", phone: "" });
+    } catch (e) {
+      setAuthError(e.message);
+    } finally { setAuthLoading(false); }
+  };
+
+  const handleLogout = () => { setUser(null); };
+
+  const requestGeolocation = () => {
+    if (!navigator.geolocation) { setGeoError(true); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { setGeoLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setGeoError(false); },
+      () => setGeoError(true)
+    );
+  };
+
+  useEffect(() => { if (alertsOpen && !geoLocation) requestGeolocation(); }, [alertsOpen]);
 
   // ── Load Leaflet ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (typeof window === "undefined" || leafletRef.current) return;
 
     const link = document.createElement("link");
-    link.rel   = "stylesheet";
-    link.href  = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    link.rel = "stylesheet";
+    link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
     document.head.appendChild(link);
 
     const script = document.createElement("script");
-    script.src   = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
     script.onload = () => initMap();
     document.head.appendChild(script);
   }, []);
@@ -113,10 +195,11 @@ export default function VoiceMap() {
     L.control.zoom({ position: "bottomright" }).addTo(map);
 
     map.on("click", (e) => {
+      if (!userRef.current) { setAuthOpen(true); setAuthMode("login"); return; }
       setClickedLatLng({ lat: e.latlng.lat, lng: e.latlng.lng });
       setPanelOpen(true);
       setTranscript("");
-      setForm({ title: "", category: "pothole", severity: "medium", impact_summary: "" });
+      setForm({ title: "", category: "pothole", other_type: "", severity: "medium", location_description: "", impact_summary: "" });
     });
 
     leafletRef.current = map;
@@ -140,8 +223,8 @@ export default function VoiceMap() {
     });
 
     filtered.forEach(report => {
-      const svg  = createPinSVG(report.category, report.severity);
-      const sev  = SEVERITIES[report.severity] || SEVERITIES.low;
+      const svg = createPinSVG(report.category, report.severity);
+      const sev = SEVERITIES[report.severity] || SEVERITIES.low;
       const size = (sev.ring * 2 + 6);
 
       const icon = L.divIcon({
@@ -249,9 +332,13 @@ export default function VoiceMap() {
       lat: clickedLatLng.lat,
       lng: clickedLatLng.lng,
       category: form.category,
-      severity: form.severity,
+      other_type: form.category === "other" ? form.other_type : undefined,
+      severity: form.severity,         // set by AI on backend; user can hint via voice
       title: form.title,
+      location_description: `${clickedLatLng.lat.toFixed(5)}, ${clickedLatLng.lng.toFixed(5)}`,
       impact_summary: form.impact_summary,
+      report_count: 1,                 // backend will aggregate
+      status: "open",                  // backend manages open/closed
       created_at: new Date().toISOString(),
     };
 
@@ -264,6 +351,7 @@ export default function VoiceMap() {
   // ── UI ────────────────────────────────────────────────────────────────────
   const cat = selected ? (CATEGORIES[selected.category] || CATEGORIES.other) : null;
   const sev = selected ? (SEVERITIES[selected.severity] || SEVERITIES.low) : null;
+  const inputStyle = { background: "#1f2937", border: "1px solid #374151", borderRadius: 8, color: "#e8e8e8", fontSize: 13, padding: "10px 12px", outline: "none", fontFamily: "'DM Sans', sans-serif" };
 
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "'DM Sans', sans-serif", background: "#0d1117", color: "#e8e8e8", position: "relative", overflow: "hidden" }}>
@@ -346,18 +434,307 @@ export default function VoiceMap() {
             })}
         </div>
 
-        {/* Hint */}
+        {/* Bottom: auth or hint */}
         <div style={{ padding: "12px 16px", borderTop: "1px solid #1f2937" }}>
-          <p style={{ fontSize: 11, color: "#4b5563", margin: 0, lineHeight: 1.5 }}>
-            Click anywhere on the map to report an issue. Use the mic button for voice input.
-          </p>
+          {user ? (
+            <div>
+              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8, lineHeight: 1.5 }}>
+                Signed in as <span style={{ color: "#e8e8e8", fontWeight: 500 }}>{user.username}</span>. Click anywhere on the map to report an issue.
+              </div>
+              <button
+                onClick={handleLogout}
+                style={{ width: "100%", padding: "8px", borderRadius: 6, border: "1px solid #374151", background: "transparent", color: "#6b7280", fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}
+              >
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <div>
+              <p style={{ fontSize: 11, color: "#4b5563", margin: "0 0 10px", lineHeight: 1.5 }}>
+                Sign in to report issues or subscribe to alerts.
+              </p>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => { setAuthMode("login"); setAuthOpen(true); setAuthError(""); }}
+                  style={{ flex: 1, padding: "8px", borderRadius: 6, border: "1px solid #374151", background: "#1f2937", color: "#e8e8e8", fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}
+                >
+                  Sign in
+                </button>
+                <button
+                  onClick={() => { setAuthMode("signup"); setAuthOpen(true); setAuthError(""); }}
+                  style={{ flex: 1, padding: "8px", borderRadius: 6, border: "none", background: "linear-gradient(135deg, #3BBFA3, #4A9EE0)", color: "#fff", fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}
+                >
+                  Sign up
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </aside>
 
       {/* ── Map ──────────────────────────────────────────────────── */}
       <div id="voicemap-container" style={{ flex: 1, position: "relative" }} />
 
-      {/* ── Selected report detail card ───────────────────────────── */}
+      {/* ── Alerts button ────────────────────────────────────────── */}
+      <button
+        onClick={() => { if (!user) { setAuthMode("login"); setAuthOpen(true); setAuthError(""); } else setAlertsOpen(true); }}
+        style={{
+          position: "absolute", top: 20, right: 20, zIndex: 1000,
+          background: "#111827", border: "1px solid #374151", borderRadius: 8,
+          color: "#e8e8e8", fontSize: 13, fontWeight: 600, padding: "10px 18px",
+          cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.5)", fontFamily: "'DM Sans', sans-serif",
+          transition: "all 0.15s",
+        }}
+        onMouseEnter={e => e.currentTarget.style.borderColor = "#3BBFA3"}
+        onMouseLeave={e => e.currentTarget.style.borderColor = "#374151"}
+      >
+        🔔 Alerts
+      </button>
+
+      {/* ── Auth modal ───────────────────────────────────────────── */}
+      {authOpen && (
+        <div style={{
+          position: "absolute", inset: 0, background: "rgba(0,0,0,0.65)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          zIndex: 4000, padding: 24,
+        }}>
+          <div style={{
+            width: "100%", maxWidth: 400,
+            background: "#111827", borderRadius: 16, border: "1px solid #1f2937",
+            padding: 28, boxShadow: "0 24px 64px rgba(0,0,0,0.9)",
+            animation: "slideUp 0.25s ease",
+          }}>
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 600 }}>
+                  {authMode === "login" ? "Sign in to VoiceMap" : "Create an account"}
+                </div>
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>
+                  {authMode === "login" ? "Report issues and subscribe to alerts" : "Join your community on VoiceMap"}
+                </div>
+              </div>
+              <button onClick={() => setAuthOpen(false)} style={{ background: "#1f2937", border: "none", borderRadius: 6, color: "#9ca3af", fontSize: 16, cursor: "pointer", padding: "4px 10px" }}>×</button>
+            </div>
+
+            {/* Fields */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <input
+                value={authForm.username}
+                onChange={e => setAuthForm(f => ({ ...f, username: e.target.value }))}
+                placeholder="Username"
+                autoComplete="username"
+                style={inputStyle}
+              />
+              <input
+                value={authForm.password}
+                onChange={e => setAuthForm(f => ({ ...f, password: e.target.value }))}
+                placeholder="Password"
+                type="password"
+                autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+                style={inputStyle}
+              />
+
+              {/* Extra fields for signup only */}
+              {authMode === "signup" && (
+                <>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+                    Provide at least one contact method for alerts:
+                  </div>
+                  <input
+                    value={authForm.email}
+                    onChange={e => setAuthForm(f => ({ ...f, email: e.target.value }))}
+                    placeholder="Email address (optional)"
+                    type="email"
+                    autoComplete="email"
+                    style={inputStyle}
+                  />
+                  <input
+                    value={authForm.phone}
+                    onChange={e => setAuthForm(f => ({ ...f, phone: e.target.value }))}
+                    placeholder="Phone number (optional)"
+                    type="tel"
+                    autoComplete="tel"
+                    style={inputStyle}
+                  />
+                </>
+              )}
+
+              {/* Error */}
+              {authError && (
+                <div style={{ fontSize: 12, color: "#D45F5F", background: "#D45F5F11", border: "1px solid #D45F5F33", borderRadius: 6, padding: "8px 10px" }}>
+                  {authError}
+                </div>
+              )}
+
+              {/* Submit */}
+              <button
+                onClick={authMode === "login" ? handleLogin : handleSignup}
+                disabled={authLoading}
+                style={{
+                  marginTop: 4, padding: "12px", borderRadius: 8, border: "none",
+                  background: authLoading ? "#1f2937" : "linear-gradient(135deg, #3BBFA3, #4A9EE0)",
+                  color: authLoading ? "#4b5563" : "#fff",
+                  fontSize: 13, fontWeight: 600, cursor: authLoading ? "not-allowed" : "pointer",
+                  fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s",
+                }}
+              >
+                {authLoading ? "Please wait…" : authMode === "login" ? "Sign in →" : "Create account →"}
+              </button>
+
+              {/* Toggle mode */}
+              <div style={{ textAlign: "center", fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                {authMode === "login" ? "Don't have an account? " : "Already have an account? "}
+                <span
+                  onClick={() => { setAuthMode(authMode === "login" ? "signup" : "login"); setAuthError(""); }}
+                  style={{ color: "#3BBFA3", cursor: "pointer", fontWeight: 500 }}
+                >
+                  {authMode === "login" ? "Sign up" : "Sign in"}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Alerts modal ─────────────────────────────────────────── */}
+      {alertsOpen && (
+        <div style={{
+          position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          zIndex: 3000, padding: 24,
+        }}>
+          <div style={{
+            width: "100%", maxWidth: 420,
+            background: "#111827", borderRadius: 16, border: "1px solid #1f2937",
+            padding: 28, boxShadow: "0 24px 64px rgba(0,0,0,0.8)",
+            animation: "slideUp 0.25s ease",
+          }}>
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 600 }}>🔔 Alert Preferences</div>
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>Get notified about issues near you</div>
+              </div>
+              <button onClick={() => setAlertsOpen(false)} style={{ background: "#1f2937", border: "none", borderRadius: 6, color: "#9ca3af", fontSize: 16, cursor: "pointer", padding: "4px 10px" }}>×</button>
+            </div>
+
+            {/* Geolocation gate */}
+            {geoError || !geoLocation ? (
+              <div style={{ textAlign: "center", padding: "24px 0" }}>
+                <div style={{ fontSize: 32, marginBottom: 12 }}>📍</div>
+                <div style={{ fontSize: 13, color: "#9ca3af", marginBottom: 16, lineHeight: 1.6 }}>
+                  Please enable location permissions to use this feature.
+                </div>
+                <button
+                  onClick={requestGeolocation}
+                  style={{
+                    padding: "10px 20px", borderRadius: 8, border: "1px solid #3BBFA3",
+                    background: "#3BBFA322", color: "#3BBFA3", fontSize: 13,
+                    fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  Enable Location Access
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                {/* Location confirmed */}
+                <div style={{ fontSize: 11, color: "#3BBFA3", fontFamily: "'DM Mono', monospace", background: "#3BBFA311", borderRadius: 6, padding: "6px 10px" }}>
+                  ✓ Location detected: {geoLocation.lat.toFixed(4)}, {geoLocation.lng.toFixed(4)}
+                </div>
+
+                {/* Enable toggle */}
+                <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={alertPrefs.enabled}
+                    onChange={e => setAlertPrefs(p => ({ ...p, enabled: e.target.checked }))}
+                    style={{ width: 16, height: 16, accentColor: "#3BBFA3", cursor: "pointer" }}
+                  />
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>Enable alerts</div>
+                    <div style={{ fontSize: 11, color: "#6b7280" }}>Receive notifications for new issues near you</div>
+                  </div>
+                </label>
+
+                {/* Options — only shown when enabled */}
+                {alertPrefs.enabled && (
+                  <>
+                    {/* Radius */}
+                    <div>
+                      <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+                        Alert radius
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {[0.25, 0.5, 1, 2, 5].map(r => (
+                          <button
+                            key={r}
+                            onClick={() => setAlertPrefs(p => ({ ...p, radius: r }))}
+                            style={{
+                              flex: 1, padding: "8px 0", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                              border: `1px solid ${alertPrefs.radius === r ? "#3BBFA3" : "#374151"}`,
+                              background: alertPrefs.radius === r ? "#3BBFA322" : "#1f2937",
+                              color: alertPrefs.radius === r ? "#3BBFA3" : "#9ca3af",
+                              cursor: "pointer", fontFamily: "'DM Mono', monospace",
+                            }}
+                          >
+                            {r}mi
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Min severity */}
+                    <div>
+                      <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+                        Minimum severity
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {Object.entries(SEVERITIES).map(([k, v]) => {
+                          const active = alertPrefs.minSeverity === k;
+                          return (
+                            <button
+                              key={k}
+                              onClick={() => setAlertPrefs(p => ({ ...p, minSeverity: k }))}
+                              style={{
+                                flex: 1, padding: "8px 0", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                                border: `1px solid ${active ? v.color : v.color + "44"}`,
+                                background: active ? v.color + "33" : "#1f2937",
+                                color: v.color,
+                                cursor: "pointer", fontFamily: "'DM Mono', monospace",
+                              }}
+                            >
+                              {v.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>
+                        You'll receive alerts for <span style={{ color: SEVERITIES[alertPrefs.minSeverity]?.color }}>{SEVERITIES[alertPrefs.minSeverity]?.label}</span> severity and above within <strong style={{ color: "#e8e8e8" }}>{alertPrefs.radius} mile{alertPrefs.radius !== 1 ? "s" : ""}</strong> of your location.
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Save */}
+                <button
+                  onClick={() => setAlertsOpen(false)}
+                  style={{
+                    padding: "12px", borderRadius: 8, border: "none",
+                    background: "linear-gradient(135deg, #3BBFA3, #4A9EE0)",
+                    color: "#fff", fontSize: 13, fontWeight: 600,
+                    cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  Save preferences
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {selected && !panelOpen && (
         <div style={{
           position: "absolute", bottom: 32, right: 32, width: 320,
@@ -486,10 +863,20 @@ export default function VoiceMap() {
                 </select>
               </div>
 
+              {/* Custom type — only shown when "Other" is selected */}
+              {form.category === "other" && (
+                <input
+                  value={form.other_type}
+                  onChange={e => setForm(f => ({ ...f, other_type: e.target.value }))}
+                  placeholder="Describe the issue type (e.g. 'Broken bench', 'Missing sign')"
+                  style={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, color: "#e8e8e8", fontSize: 13, padding: "10px 12px", outline: "none", fontFamily: "'DM Sans', sans-serif" }}
+                />
+              )}
+
               <textarea
                 value={form.impact_summary}
                 onChange={e => setForm(f => ({ ...f, impact_summary: e.target.value }))}
-                placeholder="Who does this affect? Why does it matter?"
+                placeholder="Additional details or context (optional)"
                 rows={2}
                 style={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, color: "#e8e8e8", fontSize: 12, padding: "10px 12px", outline: "none", resize: "vertical", fontFamily: "'DM Sans', sans-serif", lineHeight: 1.5 }}
               />
