@@ -1,0 +1,20 @@
+# Secrets
+.env
+.env.local
+
+# Python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local data store (JSON file DB stub)
+data/*.json
+
+# Test fixtures — audio files are user-local
+tests/fixtures/*.m4a
+tests/fixtures/*.webm
+tests/fixtures/*.mp3
+tests/fixtures/*.wav
+tests/fixtures/*.ogg
+tests/fixtures/*.mp4
