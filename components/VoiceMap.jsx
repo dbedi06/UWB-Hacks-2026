@@ -293,12 +293,24 @@ export default function VoiceMap() {
     if (!container || container._leaflet_id) return;
 
     const L = window.L;
-    const map = L.map(container, { center: BOTHELL_CENTER, zoom: 14, zoomControl: false });
+    const map = L.map(container, {
+      center: BOTHELL_CENTER,
+      zoom: 14,
+      zoomControl: false,
+      // Floor: roughly the Pacific Northwest at this zoom; prevents zooming
+      // out far enough to see the earth tiled multiple times. Cap matches
+      // the tile layer below.
+      minZoom: 10,
+      maxZoom: 19,
+      worldCopyJump: false,
+    });
 
     const tl = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
       attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
       subdomains: "abcd",
+      minZoom: 10,
       maxZoom: 19,
+      noWrap: true,           // don't repeat tiles horizontally past lng ±180
     }).addTo(map);
     tileLayerRef.current = tl;
 
