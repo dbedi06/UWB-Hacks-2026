@@ -37,10 +37,17 @@ const SEVERITIES = {
   emergency: { label: "Emergency", color: "#D45F5F", ring: 18 },
 };
 
-// Status drives pin color: active = red, pending = yellow
+// Status drives pin color. closed = null means excluded from map.
 const STATUS_COLOR = {
   active: "#D45F5F",
   pending: "#F5C842",
+  closed: null,
+};
+
+const STATUS_LABEL = {
+  active: "🔴 Active",
+  pending: "🟡 Pending fix",
+  closed: "✅ Closed",
 };
 
 const BOTHELL_CENTER = [47.7623, -122.2054];
@@ -66,7 +73,7 @@ const SEED_REPORTS = [
 function createPinSVG(category, severity, status, count = null) {
   const cat = CATEGORIES[category] || CATEGORIES.other;
   const sev = SEVERITIES[severity] || SEVERITIES.low;
-  const color = STATUS_COLOR[status] || STATUS_COLOR.active;
+  const color = STATUS_COLOR[status] ?? STATUS_COLOR.active;
   const r = sev.ring;
   const total = r * 2 + 6;
   const cx = total / 2;
@@ -197,6 +204,36 @@ export default function VoiceMap() {
   useEffect(() => { if (alertsOpen && !geoLocation) requestGeolocation(); }, [alertsOpen]);
 
   // ─── Fetch live reports on mount (falls back to seed data) ───────────────
+  // Maps DB field names + enum values → what the UI expects
+  const normalizeStatus = (s) => {
+    if (!s) return "active";
+    const v = String(s).toLowerCase().trim();
+    if (v === "pending") return "pending";
+    if (v === "resolved" || v === "dismissed") return "closed";
+    return "active"; // "active" passes through
+  };
+
+  const normalizeSeverity = (s) => {
+    if (!s) return "medium";
+    const v = String(s).toLowerCase().trim();
+    if (v === "moderate") return "medium";
+    if (v === "low" || v === "high" || v === "emergency") return v;
+    return "medium";
+  };
+
+  const normalizeReport = (r) => ({
+    id: r.id,
+    lat: r.lat,
+    lng: r.lng,
+    category: r.category || "other",
+    severity: normalizeSeverity(r.severity),
+    status: normalizeStatus(r.status),
+    title: r.title || r.description || "Untitled report",
+    impact_summary: r.impact_summary || r.description || "",
+    report_count: r.report_count || 1,
+    created_at: r.created_at || r.reported_at || new Date().toISOString(),
+  });
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     (async () => {
@@ -204,7 +241,9 @@ export default function VoiceMap() {
         const res = await fetch("/api/reports");
         if (!res.ok) return;
         const data = await res.json();
-        if (Array.isArray(data.reports)) setReports(data.reports);
+        if (Array.isArray(data.reports)) {
+          setReports(data.reports.map(normalizeReport));
+        }
       } catch { /* keep seed data when API unavailable */ }
     })();
   }, []);
@@ -241,6 +280,7 @@ export default function VoiceMap() {
 
     map.on("click", e => {
       if (isDraggingRef.current) return;
+      setSelected(null); // always clear selected card when clicking map
       if (!userRef.current) { setAuthOpen(true); setAuthMode("login"); return; }
       setClickedLatLng({ lat: e.latlng.lat, lng: e.latlng.lng });
       setPanelOpen(true);
@@ -263,6 +303,7 @@ export default function VoiceMap() {
 
     reports
       .filter(r =>
+        r.status !== "closed" &&
         (filter.category === "all" || r.category === filter.category) &&
         (filter.severity === "all" || r.severity === filter.severity)
       )
@@ -277,7 +318,10 @@ export default function VoiceMap() {
         });
         const marker = L.marker([report.lat, report.lng], { icon })
           .addTo(map)
-          .on("click", () => setSelected(report));
+          .on("click", e => {
+            L.DomEvent.stopPropagation(e);
+            setSelected(report);
+          });
         markersRef.current[report.id] = marker;
       });
   }, [reports, filter, mapReady]);
@@ -378,14 +422,21 @@ export default function VoiceMap() {
     const body = {
       lat: ai.location.lat,
       lng: ai.location.lng,
+<<<<<<< HEAD
+      title: ai.report.impact_summary,
+=======
       title: ai.report.title,
+>>>>>>> 411f330a78adaa1e29042b62146864b0f90d76d2
       category: ai.report.category,
       severity: ai.report.severity,
       impactSummary: ai.report.impact_summary,
       transcript: ai.transcript,
+<<<<<<< HEAD
+=======
       tags: ai.report.tags,
       confidence: ai.report.confidence,
       duration: ai.report.duration,
+>>>>>>> 411f330a78adaa1e29042b62146864b0f90d76d2
       sessionToken,
       userId: parseUuid(userRef.current?.id) ?? undefined,
     };
@@ -433,7 +484,7 @@ export default function VoiceMap() {
 
   // ─── Manual form submission ───────────────────────────────────────────────
   const submitReport = async () => {
-    if (!clickedLatLng || !form.title.trim()) return;
+    if (!clickedLatLng || !form.impact_summary.trim()) return;
 
     const sessionToken = ensureSessionToken();
     if (!parseUuid(sessionToken)) {
@@ -455,11 +506,10 @@ export default function VoiceMap() {
         body: JSON.stringify({
           lat: clickedLatLng.lat,
           lng: clickedLatLng.lng,
-          title: form.title.trim(),
+          title: form.impact_summary.trim(),
           category: form.category,
           severity: form.severity,
-          impactSummary: form.impact_summary,
-          otherIssueLabel: form.category === "other" ? form.other_type : undefined,
+          impactSummary: form.impact_summary.trim(),
           transcript: transcript || undefined,
           sessionToken,
           userId: parseUuid(user?.id) ?? undefined,
@@ -469,7 +519,7 @@ export default function VoiceMap() {
       if (!res.ok) throw new Error(data.error || "Failed to save report");
       const newReport = data.report;
       if (!newReport) throw new Error("Invalid response from server");
-      setReports(prev => [...prev, newReport]);
+      setReports(prev => [...prev, normalizeReport(newReport)]);
       setPanelOpen(false);
       setSelected(newReport);
       setClickedLatLng(null);
@@ -480,12 +530,11 @@ export default function VoiceMap() {
         lat: clickedLatLng.lat,
         lng: clickedLatLng.lng,
         category: form.category,
-        other_type: form.category === "other" ? form.other_type : undefined,
         severity: form.severity,
         status: "active",
-        title: form.title.trim(),
+        title: form.impact_summary.trim(),
         location_description: `${clickedLatLng.lat.toFixed(5)}, ${clickedLatLng.lng.toFixed(5)}`,
-        impact_summary: form.impact_summary,
+        impact_summary: form.impact_summary.trim(),
         report_count: 1,
         created_at: new Date().toISOString(),
       };
@@ -547,7 +596,7 @@ export default function VoiceMap() {
         {/* Stats */}
         <div style={{ padding: "14px 16px", borderBottom: `1px solid ${T.border}`, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {[
-            { label: "Total", value: reports.length },
+            { label: "Total", value: reports.reduce((s, r) => s + (r.report_count || 1), 0) },
             { label: "Active", value: reports.filter(r => r.status === "active").length },
           ].map(s => (
             <div key={s.label} style={{ background: T.card, borderRadius: 8, padding: "8px 10px" }}>
@@ -559,7 +608,7 @@ export default function VoiceMap() {
 
         {/* Status legend */}
         <div style={{ padding: "10px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", gap: 12 }}>
-          {Object.entries(STATUS_COLOR).map(([k, c]) => (
+          {Object.entries(STATUS_COLOR).filter(([, c]) => c !== null).map(([k, c]) => (
             <div key={k} style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <div style={{ width: 10, height: 10, borderRadius: "50%", background: c }} />
               <span style={{ fontSize: 11, color: T.textMuted, textTransform: "capitalize" }}>{k}</span>
@@ -684,8 +733,8 @@ export default function VoiceMap() {
           </div>
 
           <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", background: (STATUS_COLOR[selected.status] || "#D45F5F") + "22", color: STATUS_COLOR[selected.status] || "#D45F5F", borderRadius: 4, padding: "3px 8px", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>
-              {selected.status === "active" ? "🔴 Active" : "🟡 Pending fix"}
+            <span style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", background: (STATUS_COLOR[selected.status] ?? "#8A8A8A") + "22", color: STATUS_COLOR[selected.status] ?? "#8A8A8A", borderRadius: 4, padding: "3px 8px", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>
+              {STATUS_LABEL[selected.status] || selected.status}
             </span>
             <span style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", background: sev?.color + "22", color: sev?.color, borderRadius: 4, padding: "3px 8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
               {selected.severity}
@@ -868,12 +917,6 @@ export default function VoiceMap() {
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <input
-                value={form.title}
-                onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                placeholder="Short description (e.g. 'Broken streetlight at Oak & 5th')"
-                style={inputStyle}
-              />
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
                   style={{ ...inputStyle, fontSize: 12, padding: "10px" }}>
@@ -884,19 +927,13 @@ export default function VoiceMap() {
                   {Object.entries(SEVERITIES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                 </select>
               </div>
-              {form.category === "other" && (
-                <input
-                  value={form.other_type}
-                  onChange={e => setForm(f => ({ ...f, other_type: e.target.value }))}
-                  placeholder="Describe the issue type (e.g. 'Broken bench', 'Missing sign')"
-                  style={inputStyle}
-                />
-              )}
               <textarea
                 value={form.impact_summary}
                 onChange={e => setForm(f => ({ ...f, impact_summary: e.target.value }))}
-                placeholder="Additional details or context (optional)"
-                rows={2}
+                placeholder={form.category === "other"
+                  ? "Describe the issue (e.g. 'Broken bench near the playground')"
+                  : "Describe the issue (e.g. 'Broken streetlight at Oak & 5th, out for 2 weeks')"}
+                rows={3}
                 style={{ ...inputStyle, fontSize: 12, resize: "vertical", lineHeight: 1.5 }}
               />
               {form.severity === "emergency" && (
@@ -910,8 +947,8 @@ export default function VoiceMap() {
               )}
               <button
                 onClick={submitReport}
-                disabled={!form.title.trim() || reportSubmitting}
-                style={{ padding: "12px", borderRadius: 8, border: "none", background: form.title.trim() && !reportSubmitting ? "linear-gradient(135deg, #3BBFA3, #4A9EE0)" : T.card, color: form.title.trim() && !reportSubmitting ? "#fff" : T.textDim, fontSize: 13, fontWeight: 600, cursor: form.title.trim() && !reportSubmitting ? "pointer" : "not-allowed", fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s" }}
+                disabled={!form.impact_summary.trim() || reportSubmitting}
+                style={{ padding: "12px", borderRadius: 8, border: "none", background: form.impact_summary.trim() && !reportSubmitting ? "linear-gradient(135deg, #3BBFA3, #4A9EE0)" : T.card, color: form.impact_summary.trim() && !reportSubmitting ? "#fff" : T.textDim, fontSize: 13, fontWeight: 600, cursor: form.impact_summary.trim() && !reportSubmitting ? "pointer" : "not-allowed", fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s" }}
               >
                 {reportSubmitting ? "Saving…" : "Pin to map →"}
               </button>
