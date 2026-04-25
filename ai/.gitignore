@@ -1,0 +1,5 @@
+# Python artifacts inside ai/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
