@@ -44,7 +44,7 @@ export async function GET(request) {
     const rows = await sql`
       SELECT * FROM reports
       WHERE
-        status = 'active'
+        status NOT IN ('resolved', 'dismissed')
         AND lat BETWEEN ${bounds.minLat}::double precision AND ${bounds.maxLat}::double precision
         AND lng BETWEEN ${bounds.minLng}::double precision AND ${bounds.maxLng}::double precision
       ORDER BY reported_at DESC
