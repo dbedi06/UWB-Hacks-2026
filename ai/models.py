@@ -30,6 +30,10 @@ Severity = Literal["low", "medium", "high", "emergency"]
 
 
 class ExtractedReport(BaseModel):
+    title: str = Field(
+        description="≤8-word pin label combining concrete subject + location, "
+                    "e.g. 'Streetlight out at Oak & 5th'"
+    )
     transcript: str = Field(description="Verbatim transcription of the audio")
     category: Category
     severity: Severity

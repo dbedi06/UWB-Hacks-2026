@@ -12,6 +12,7 @@ from ai.models import ExtractedReport
 
 SAMPLES: list[ExtractedReport] = [
     ExtractedReport(
+        title="Streetlight out at Oak & 5th",
         transcript="There's a broken streetlight at the corner of Oak and 5th, it's been out for three weeks and my kid walks this way to school.",
         category="streetlight",
         severity="high",
@@ -22,6 +23,7 @@ SAMPLES: list[ExtractedReport] = [
         confidence=0.95,
     ),
     ExtractedReport(
+        title="Pothole on Mission near 24th",
         transcript="Huge pothole on Mission near 24th, I almost blew a tire yesterday and there was a cyclist who had to swerve into traffic.",
         category="pothole",
         severity="high",
@@ -32,8 +34,9 @@ SAMPLES: list[ExtractedReport] = [
         confidence=0.9,
     ),
     ExtractedReport(
+        title="Crosswalk signal broken at Valencia & 16th",
         transcript="The crosswalk light at Valencia and 16th hasn't been working for days, old folks from the senior center have been crossing in traffic.",
-        category="crosswalk_traffic",
+        category="crosswalk",
         severity="high",
         specific_location="Valencia and 16th",
         duration="several days",

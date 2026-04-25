@@ -79,6 +79,7 @@ async def insert_report(
         "extracted_location_text": report.specific_location or None,
         "location_resolved": location_resolved,
         "transcript": report.transcript,
+        "title": report.title,
         "category": report.category,
         "severity": report.severity,
         "duration": report.duration or None,
@@ -157,6 +158,7 @@ def _row_to_response(row: dict) -> ReportResponse:
         id=row["id"],
         transcript=row["transcript"],
         report={
+            "title": row.get("title") or "",
             "category": row["category"],
             "severity": row["severity"],
             "specific_location": row.get("extracted_location_text") or "",

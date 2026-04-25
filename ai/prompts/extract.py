@@ -37,6 +37,14 @@ Short snake_case descriptors. Extract 0-5 based on what's actually mentioned or 
 - Specific hazards: fall_hazard, visibility_hazard, water_hazard, fire_risk, crime_adjacent
 - Never invent tags not supported by the transcript.
 
+TITLE:
+A short pin label (≤ 8 words). Concrete subject + location when known. Title fragment, not a full sentence — what fits on a map pin.
+Good: "Streetlight out at Oak & 5th"
+Good: "Pothole on Mission near 24th"
+Good: "Sofa dumped behind library"
+Bad: "There is a broken streetlight" (no location, full sentence)
+Bad: "Parent reports unlit intersection on child's walking route to school" (that's the impact_summary, not the title)
+
 IMPACT_SUMMARY:
 One sentence, 15-35 words, written in third person, that a city department head would read in a triage queue. Must preserve:
 - The concrete problem
