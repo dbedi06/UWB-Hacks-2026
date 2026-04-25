@@ -279,8 +279,16 @@ export default function VoiceMap() {
   }, []);
 
   const initMap = useCallback(() => {
+    // React StrictMode double-mounts in dev, and the markercluster/Leaflet
+    // script loaders both fire onload again on the second mount. Bail out
+    // if either Leaflet has already attached to this container OR our ref
+    // is already populated.
+    if (leafletRef.current) return;
+    const container = document.getElementById("voicemap-container");
+    if (!container || container._leaflet_id) return;
+
     const L = window.L;
-    const map = L.map("voicemap-container", { center: BOTHELL_CENTER, zoom: 14, zoomControl: false });
+    const map = L.map(container, { center: BOTHELL_CENTER, zoom: 14, zoomControl: false });
 
     const tl = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
       attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
