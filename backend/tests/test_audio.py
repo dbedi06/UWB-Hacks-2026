@@ -39,6 +39,7 @@ async def main() -> None:
     )
 
     print()
+    print(f"Title:         {result.title}")
     print(f"Transcript:    {result.transcript}")
     print(f"Category:      {result.category}")
     print(f"Severity:      {result.severity}")
