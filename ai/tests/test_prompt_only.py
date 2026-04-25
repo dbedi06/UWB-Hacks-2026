@@ -22,6 +22,7 @@ async def main() -> None:
     for text in SAMPLES:
         print(f"\n── Input: {text}")
         result = await extract_report_from_text(text)
+        print(f"   Title:      {result.title}")
         print(f"   Category:   {result.category}")
         print(f"   Severity:   {result.severity}")
         print(f"   Location:   {result.specific_location!r}")
