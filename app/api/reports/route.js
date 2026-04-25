@@ -113,19 +113,41 @@ export async function POST(request) {
     transcript: body.transcript,
   });
 
+  // Optional AI-extracted columns added in schema PR #2.
+  // tags must be lower_snake_case strings; cap at 8 to keep rows lean.
+  const tags = Array.isArray(body.tags)
+    ? body.tags
+        .filter((t) => typeof t === "string" && /^[a-z][a-z0-9_]*$/.test(t))
+        .slice(0, 8)
+    : [];
+  const confidence =
+    typeof body.confidence === "number" && body.confidence >= 0 && body.confidence <= 1
+      ? body.confidence
+      : null;
+  const duration =
+    typeof body.duration === "string" && body.duration.trim()
+      ? body.duration.trim()
+      : null;
+
   const dbSev = uiSeverityToDb(sev);
 
   try {
     const [row] = await sql`
       WITH new_row AS (
-        INSERT INTO reports (user_id, session_token, lat, lng, category, description)
+        INSERT INTO reports (
+          user_id, session_token, lat, lng, category, description,
+          tags, confidence, duration
+        )
         VALUES (
           ${userUuid}::uuid,
           ${sessionToken}::uuid,
           ${lat}::double precision,
           ${lng}::double precision,
           ${category}::varchar(100),
-          ${descriptionText}::text
+          ${descriptionText}::text,
+          ${tags}::text[],
+          ${confidence}::real,
+          ${duration}::text
         )
         RETURNING id
       )
