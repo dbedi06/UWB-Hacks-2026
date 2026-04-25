@@ -19,6 +19,21 @@ function ensureSessionToken() {
 // ─── Backend URL ──────────────────────────────────────────────────────────────
 const VOICEMAP_BACKEND = process.env.NEXT_PUBLIC_VOICEMAP_BACKEND || "http://localhost:8000";
 
+// ─── Cloudinary image upload ──────────────────────────────────────────────────
+async function uploadToCloudinary(file) {
+  if (file.size > 10 * 1024 * 1024) throw new Error("Image must be under 10MB");
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET);
+  const res = await fetch(
+    `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`,
+    { method: "POST", body: formData }
+  );
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message);
+  return data.secure_url;
+}
+
 // ─── Category / severity config ───────────────────────────────────────────────
 const CATEGORIES = {
   pothole: { label: "Pothole", color: "#E07B39", icon: "🕳️" },
@@ -37,7 +52,6 @@ const SEVERITIES = {
   emergency: { label: "Emergency", color: "#D45F5F", ring: 18 },
 };
 
-// Status drives pin color. closed = null means excluded from map.
 const STATUS_COLOR = {
   active: "#D45F5F",
   pending: "#F5C842",
@@ -69,7 +83,6 @@ const SEED_REPORTS = [
 ];
 
 // ─── Pin SVG ─────────────────────────────────────────────────────────────────
-// Color is driven by status (active/pending); count badge from friends' version.
 function createPinSVG(category, severity, status, count = null) {
   const cat = CATEGORIES[category] || CATEGORIES.other;
   const sev = SEVERITIES[severity] || SEVERITIES.low;
@@ -98,12 +111,12 @@ export default function VoiceMap() {
   const leafletRef = useRef(null);
   const tileLayerRef = useRef(null);
   const markersRef = useRef({});
-  const clusterRef = useRef(null);       // markercluster group for all pins
+  const clusterRef = useRef(null);
   const userRef = useRef(null);
   const recognitionRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
-  const isDraggingRef = useRef(false);   // drag-vs-click fix
+  const isDraggingRef = useRef(false);
 
   // ── UI state ──────────────────────────────────────────────────────────────
   const [darkMode, setDarkMode] = useState(true);
@@ -117,6 +130,11 @@ export default function VoiceMap() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [filter, setFilter] = useState({ category: "all", severity: "all" });
   const [mapReady, setMapReady] = useState(false);
+
+  // ── Image state ───────────────────────────────────────────────────────────
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [imageUploading, setImageUploading] = useState(false);
 
   // ── Alert state ───────────────────────────────────────────────────────────
   const [alertsOpen, setAlertsOpen] = useState(false);
@@ -132,9 +150,12 @@ export default function VoiceMap() {
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
-  // ── Report submission state (from friends' version) ───────────────────────
+  // ── Report submission state ───────────────────────────────────────────────
   const [reportError, setReportError] = useState("");
   const [reportSubmitting, setReportSubmitting] = useState(false);
+
+  // ── Lightbox state ────────────────────────────────────────────────────────
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   useEffect(() => { userRef.current = user; }, [user]);
 
@@ -149,21 +170,31 @@ export default function VoiceMap() {
     tiles: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
   };
 
-  // Swap tile layer on theme change
   useEffect(() => { if (tileLayerRef.current) tileLayerRef.current.setUrl(T.tiles); }, [darkMode]);
+
+  // ─── Image helpers ────────────────────────────────────────────────────────
+  const resetImageState = () => {
+    setImageFile(null);
+    setImagePreview(null);
+  };
+
+  const handleImageSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert("Image must be under 10MB");
+      e.target.value = "";
+      return;
+    }
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+  };
 
   // ─── Auth handlers ────────────────────────────────────────────────────────
   const handleLogin = async () => {
     if (!authForm.username || !authForm.password) { setAuthError("Please enter your username and password."); return; }
     setAuthLoading(true); setAuthError("");
     try {
-      // ── BACKEND HOOK: uncomment when ready ──
-      // const res  = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: authForm.username, password: authForm.password }) });
-      // const data = await res.json();
-      // if (!res.ok) throw new Error(data.message || "Login failed");
-      // setUser(data.user); // expects { id, username, email, phone, token }
-
-      // ── MOCK — remove when backend is ready ──
       await new Promise(r => setTimeout(r, 600));
       setUser({ id: "u1", username: authForm.username, email: authForm.email || "", phone: authForm.phone || "" });
       setAuthOpen(false);
@@ -177,13 +208,6 @@ export default function VoiceMap() {
     if (!authForm.email && !authForm.phone) { setAuthError("Please provide at least an email or phone number."); return; }
     setAuthLoading(true); setAuthError("");
     try {
-      // ── BACKEND HOOK: uncomment when ready ──
-      // const res  = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/auth/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: authForm.username, password: authForm.password, email: authForm.email || null, phone: authForm.phone || null }) });
-      // const data = await res.json();
-      // if (!res.ok) throw new Error(data.message || "Signup failed");
-      // setUser(data.user);
-
-      // ── MOCK — remove when backend is ready ──
       await new Promise(r => setTimeout(r, 600));
       setUser({ id: "u1", username: authForm.username, email: authForm.email, phone: authForm.phone });
       setAuthOpen(false);
@@ -204,14 +228,13 @@ export default function VoiceMap() {
   };
   useEffect(() => { if (alertsOpen && !geoLocation) requestGeolocation(); }, [alertsOpen]);
 
-  // ─── Fetch live reports on mount (falls back to seed data) ───────────────
-  // Maps DB field names + enum values → what the UI expects
+  // ─── Fetch live reports on mount ──────────────────────────────────────────
   const normalizeStatus = (s) => {
     if (!s) return "active";
     const v = String(s).toLowerCase().trim();
     if (v === "pending") return "pending";
     if (v === "resolved" || v === "dismissed") return "closed";
-    return "active"; // "active" passes through
+    return "active";
   };
 
   const normalizeSeverity = (s) => {
@@ -232,6 +255,7 @@ export default function VoiceMap() {
     title: r.title || r.description || "Untitled report",
     impact_summary: r.impact_summary || r.description || "",
     report_count: r.report_count || 1,
+    image_url: r.image_url || null,
     created_at: r.created_at || r.reported_at || new Date().toISOString(),
   });
 
@@ -253,7 +277,6 @@ export default function VoiceMap() {
   useEffect(() => {
     if (typeof window === "undefined" || leafletRef.current) return;
 
-    // Leaflet base CSS + JS, then markercluster CSS + JS chained on top.
     const cssHrefs = [
       "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
       "https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css",
@@ -269,7 +292,6 @@ export default function VoiceMap() {
     const leafletScript = document.createElement("script");
     leafletScript.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
     leafletScript.onload = () => {
-      // markercluster depends on Leaflet — load it after Leaflet finishes
       const mcScript = document.createElement("script");
       mcScript.src = "https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js";
       mcScript.onload = () => initMap();
@@ -279,10 +301,6 @@ export default function VoiceMap() {
   }, []);
 
   const initMap = useCallback(() => {
-    // React StrictMode double-mounts in dev, and the markercluster/Leaflet
-    // script loaders both fire onload again on the second mount. Bail out
-    // if either Leaflet has already attached to this container OR our ref
-    // is already populated.
     if (leafletRef.current) return;
     const container = document.getElementById("voicemap-container");
     if (!container || container._leaflet_id) return;
@@ -299,23 +317,20 @@ export default function VoiceMap() {
 
     L.control.zoom({ position: "bottomright" }).addTo(map);
 
-    // Drag-vs-click fix
     map.on("dragstart", () => { isDraggingRef.current = true; });
     map.on("dragend", () => { setTimeout(() => { isDraggingRef.current = false; }, 50); });
 
     map.on("click", e => {
       if (isDraggingRef.current) return;
-      setSelected(null); // always clear selected card when clicking map
+      setSelected(null);
       if (!userRef.current) { setAuthOpen(true); setAuthMode("login"); return; }
       setClickedLatLng({ lat: e.latlng.lat, lng: e.latlng.lng });
       setPanelOpen(true);
       setTranscript("");
       setForm({ title: "", category: "pothole", other_type: "", severity: "medium", impact_summary: "" });
+      resetImageState();
     });
 
-    // Cluster group: nearby pins collapse into a single counted icon. Single
-    // pins still render as their own SVG. Cluster icon uses the dominant
-    // category's color so the dark-themed map stays consistent.
     const cluster = L.markerClusterGroup({
       maxClusterRadius: 40,
       showCoverageOnHover: true,
@@ -370,20 +385,17 @@ export default function VoiceMap() {
             L.DomEvent.stopPropagation(e);
             setSelected(report);
           });
-        marker._report = report; // used by cluster iconCreateFunction
+        marker._report = report;
         cluster.addLayer(marker);
         markersRef.current[report.id] = marker;
       });
   }, [reports, filter, mapReady]);
 
   // ─── Voice recording ──────────────────────────────────────────────────────
-  // Captures raw audio for FastAPI (Whisper + GPT-4o) while also using Web
-  // Speech API for a live transcript preview in the UI.
   const startRecording = async () => {
     setRecording(true);
     setTranscript("");
 
-    // Raw audio capture for FastAPI pipeline
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mr = new MediaRecorder(stream);
@@ -400,7 +412,6 @@ export default function VoiceMap() {
       console.error("Microphone unavailable:", e);
     }
 
-    // Web Speech API — live transcript display only
     if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
       const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
       const rec = new SR();
@@ -417,7 +428,7 @@ export default function VoiceMap() {
   const stopRecording = () => {
     if (recognitionRef.current) recognitionRef.current.stop();
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop(); // triggers mr.onstop → submitVoiceReport
+      mediaRecorderRef.current.stop();
     }
     setRecording(false);
   };
@@ -427,7 +438,6 @@ export default function VoiceMap() {
     if (!clickedLatLng) return;
     setIsProcessing(true);
 
-    // Step 1: send audio to FastAPI for Whisper + GPT-4o extraction
     const fd = new FormData();
     fd.append("audio", audioBlob, `recording.${mimeType.includes("mp4") ? "m4a" : "webm"}`);
     fd.append("lat", String(clickedLatLng.lat));
@@ -451,7 +461,6 @@ export default function VoiceMap() {
 
     setTranscript(ai.transcript);
 
-    // Step 2: emergency / crime check
     if (ai.report.severity === "emergency") {
       if (!window.confirm("⚠️ This sounds like an emergency. Please call 911 first.\n\nLog as a non-emergency report anyway?")) {
         setIsProcessing(false);
@@ -464,7 +473,6 @@ export default function VoiceMap() {
       }
     }
 
-    // Step 3: low-confidence confirmation
     if (ai.report.confidence < 0.7) {
       if (!window.confirm(`I heard: "${ai.transcript}"\n\nDoes that look right?`)) {
         setIsProcessing(false);
@@ -472,7 +480,22 @@ export default function VoiceMap() {
       }
     }
 
-    // Step 4: persist via Next.js /api/reports (same endpoint as manual form)
+    // Upload image to Cloudinary if one was attached
+    let uploadedImageUrl = null;
+    if (imageFile) {
+      try {
+        setImageUploading(true);
+        uploadedImageUrl = await uploadToCloudinary(imageFile);
+      } catch (e) {
+        alert("Image upload failed: " + e.message);
+        setIsProcessing(false);
+        setImageUploading(false);
+        return;
+      } finally {
+        setImageUploading(false);
+      }
+    }
+
     const sessionToken = ensureSessionToken();
     const body = {
       lat: ai.location.lat,
@@ -485,6 +508,7 @@ export default function VoiceMap() {
       tags: ai.report.tags,
       confidence: ai.report.confidence,
       duration: ai.report.duration,
+      image_url: uploadedImageUrl,
       sessionToken,
       userId: parseUuid(userRef.current?.id) ?? undefined,
     };
@@ -506,8 +530,8 @@ export default function VoiceMap() {
       setSelected(report);
       setPanelOpen(false);
       setClickedLatLng(null);
+      resetImageState();
     } catch {
-      // Fallback local pin if /api/reports isn't wired yet
       const localReport = {
         id: `r-${Date.now()}`,
         lat: ai.location.lat,
@@ -518,6 +542,7 @@ export default function VoiceMap() {
         title: ai.report.impact_summary,
         location_description: `${ai.location.lat.toFixed(5)}, ${ai.location.lng.toFixed(5)}`,
         impact_summary: ai.report.impact_summary,
+        image_url: uploadedImageUrl,
         report_count: 1,
         created_at: new Date().toISOString(),
       };
@@ -525,6 +550,7 @@ export default function VoiceMap() {
       setSelected(localReport);
       setPanelOpen(false);
       setClickedLatLng(null);
+      resetImageState();
     } finally {
       setIsProcessing(false);
     }
@@ -547,6 +573,22 @@ export default function VoiceMap() {
     setReportSubmitting(true);
     setReportError("");
 
+    // Upload image to Cloudinary first if one was attached
+    let uploadedImageUrl = null;
+    if (imageFile) {
+      try {
+        setImageUploading(true);
+        uploadedImageUrl = await uploadToCloudinary(imageFile);
+      } catch (e) {
+        setReportError("Image upload failed: " + e.message);
+        setReportSubmitting(false);
+        setImageUploading(false);
+        return;
+      } finally {
+        setImageUploading(false);
+      }
+    }
+
     try {
       const res = await fetch("/api/reports", {
         method: "POST",
@@ -559,6 +601,7 @@ export default function VoiceMap() {
           severity: form.severity,
           impactSummary: form.impact_summary.trim(),
           transcript: transcript || undefined,
+          image_url: uploadedImageUrl,
           sessionToken,
           userId: parseUuid(user?.id) ?? undefined,
         }),
@@ -571,8 +614,8 @@ export default function VoiceMap() {
       setPanelOpen(false);
       setSelected(newReport);
       setClickedLatLng(null);
+      resetImageState();
     } catch (e) {
-      // Fallback: drop local pin if backend isn't wired yet
       const localReport = {
         id: `r-${Date.now()}`,
         lat: clickedLatLng.lat,
@@ -583,6 +626,7 @@ export default function VoiceMap() {
         title: form.impact_summary.trim(),
         location_description: `${clickedLatLng.lat.toFixed(5)}, ${clickedLatLng.lng.toFixed(5)}`,
         impact_summary: form.impact_summary.trim(),
+        image_url: uploadedImageUrl,
         report_count: 1,
         created_at: new Date().toISOString(),
       };
@@ -590,7 +634,7 @@ export default function VoiceMap() {
       setPanelOpen(false);
       setSelected(localReport);
       setClickedLatLng(null);
-      // Only surface genuine errors (not the fallback path)
+      resetImageState();
       if (e.message !== "Failed to fetch") setReportError(e.message);
     } finally {
       setReportSubmitting(false);
@@ -625,6 +669,7 @@ export default function VoiceMap() {
         ::-webkit-scrollbar { width: 4px }
         ::-webkit-scrollbar-track { background: transparent }
         ::-webkit-scrollbar-thumb { background: ${T.border2}; border-radius: 4px }
+        .vm-img-thumb:hover { opacity: 0.85; }
       `}</style>
 
       {/* ── Sidebar ──────────────────────────────────────────────── */}
@@ -700,6 +745,7 @@ export default function VoiceMap() {
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
                     <span style={{ fontSize: 13 }}>{c.icon}</span>
                     <span style={{ fontSize: 12, fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.text }}>{r.title}</span>
+                    {r.image_url && <span style={{ fontSize: 10, color: T.textMuted }} title="Has photo">📷</span>}
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                     <span style={{ fontSize: 9, fontFamily: "'DM Mono', monospace", background: sc + "22", color: sc, borderRadius: 3, padding: "1px 5px", textTransform: "uppercase", letterSpacing: "0.05em" }}>{r.status}</span>
@@ -780,6 +826,21 @@ export default function VoiceMap() {
             <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", color: T.textMuted, fontSize: 18, cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
           </div>
 
+          {/* Photo — clickable to open lightbox */}
+          {selected.image_url && (
+            <div style={{ marginBottom: 12, borderRadius: 8, overflow: "hidden", cursor: "zoom-in" }} onClick={() => setLightboxOpen(true)}>
+              <img
+                src={selected.image_url}
+                alt="Report photo"
+                className="vm-img-thumb"
+                style={{ width: "100%", maxHeight: 160, objectFit: "cover", display: "block", transition: "opacity 0.15s" }}
+              />
+              <div style={{ fontSize: 10, color: T.textMuted, textAlign: "center", padding: "4px 0 2px", background: T.card }}>
+                Click to enlarge
+              </div>
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
             <span style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", background: (STATUS_COLOR[selected.status] ?? "#8A8A8A") + "22", color: STATUS_COLOR[selected.status] ?? "#8A8A8A", borderRadius: 4, padding: "3px 8px", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>
               {STATUS_LABEL[selected.status] || selected.status}
@@ -806,6 +867,27 @@ export default function VoiceMap() {
           <div style={{ fontSize: 10, color: T.textDim, fontFamily: "'DM Mono', monospace" }}>
             {selected.lat.toFixed(5)}, {selected.lng.toFixed(5)}
           </div>
+        </div>
+      )}
+
+      {/* ── Lightbox ──────────────────────────────────────────────── */}
+      {lightboxOpen && selected?.image_url && (
+        <div
+          onClick={() => setLightboxOpen(false)}
+          style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 5000, cursor: "zoom-out", padding: 24 }}
+        >
+          <img
+            src={selected.image_url}
+            alt="Report photo full size"
+            style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 10, objectFit: "contain", boxShadow: "0 8px 48px rgba(0,0,0,0.8)" }}
+            onClick={e => e.stopPropagation()}
+          />
+          <button
+            onClick={() => setLightboxOpen(false)}
+            style={{ position: "absolute", top: 20, right: 20, background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, color: "#fff", fontSize: 18, cursor: "pointer", padding: "6px 12px", fontFamily: "'DM Sans', sans-serif" }}
+          >
+            ✕ Close
+          </button>
         </div>
       )}
 
@@ -935,7 +1017,7 @@ export default function VoiceMap() {
                   </div>
                 )}
               </div>
-              <button onClick={() => setPanelOpen(false)} style={closeBtn}>×</button>
+              <button onClick={() => { setPanelOpen(false); resetImageState(); }} style={closeBtn}>×</button>
             </div>
 
             {/* Voice button */}
@@ -975,6 +1057,7 @@ export default function VoiceMap() {
                   {Object.entries(SEVERITIES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                 </select>
               </div>
+
               <textarea
                 value={form.impact_summary}
                 onChange={e => setForm(f => ({ ...f, impact_summary: e.target.value }))}
@@ -984,6 +1067,51 @@ export default function VoiceMap() {
                 rows={3}
                 style={{ ...inputStyle, fontSize: 12, resize: "vertical", lineHeight: 1.5 }}
               />
+
+              {/* ── Image attachment ── */}
+              <div>
+                <input
+                  id="vm-image-input"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageSelect}
+                  style={{ display: "none" }}
+                />
+                {imagePreview ? (
+                  <div style={{ position: "relative", borderRadius: 8, overflow: "hidden" }}>
+                    <img
+                      src={imagePreview}
+                      alt="Preview"
+                      style={{ width: "100%", maxHeight: 160, objectFit: "cover", display: "block" }}
+                    />
+                    <button
+                      onClick={() => { resetImageState(); document.getElementById("vm-image-input").value = ""; }}
+                      style={{ position: "absolute", top: 6, right: 6, background: "rgba(0,0,0,0.65)", border: "none", borderRadius: "50%", color: "#fff", width: 26, height: 26, cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif" }}
+                    >
+                      ×
+                    </button>
+                    <div style={{ fontSize: 10, color: T.textMuted, padding: "4px 8px", background: T.card }}>
+                      {imageFile?.name} · {(imageFile?.size / 1024).toFixed(0)} KB
+                    </div>
+                  </div>
+                ) : (
+                  <label
+                    htmlFor="vm-image-input"
+                    style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "12px", borderRadius: 10, border: `2px dashed ${T.border2}`, background: T.card, color: T.textFaint, fontSize: 13, cursor: "pointer", transition: "border-color 0.15s", boxSizing: "border-box" }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = "#3BBFA3"}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = T.border2}
+                  >
+                    <span style={{ fontSize: 16 }}>📷</span>
+                    Attach a photo <span style={{ fontSize: 11, color: T.textDim }}>(optional, max 10MB)</span>
+                  </label>
+                )}
+                {imageUploading && (
+                  <div style={{ textAlign: "center", fontSize: 11, color: "#3BBFA3", marginTop: 6 }}>
+                    ↑ Uploading photo to Cloudinary…
+                  </div>
+                )}
+              </div>
+
               {form.severity === "emergency" && (
                 <div style={{ background: "#D45F5F22", border: "1px solid #D45F5F55", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "#D45F5F", display: "flex", gap: 8 }}>
                   <span>⚠️</span>
@@ -995,10 +1123,10 @@ export default function VoiceMap() {
               )}
               <button
                 onClick={submitReport}
-                disabled={!form.impact_summary.trim() || reportSubmitting}
-                style={{ padding: "12px", borderRadius: 8, border: "none", background: form.impact_summary.trim() && !reportSubmitting ? "linear-gradient(135deg, #3BBFA3, #4A9EE0)" : T.card, color: form.impact_summary.trim() && !reportSubmitting ? "#fff" : T.textDim, fontSize: 13, fontWeight: 600, cursor: form.impact_summary.trim() && !reportSubmitting ? "pointer" : "not-allowed", fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s" }}
+                disabled={!form.impact_summary.trim() || reportSubmitting || imageUploading}
+                style={{ padding: "12px", borderRadius: 8, border: "none", background: form.impact_summary.trim() && !reportSubmitting && !imageUploading ? "linear-gradient(135deg, #3BBFA3, #4A9EE0)" : T.card, color: form.impact_summary.trim() && !reportSubmitting && !imageUploading ? "#fff" : T.textDim, fontSize: 13, fontWeight: 600, cursor: form.impact_summary.trim() && !reportSubmitting && !imageUploading ? "pointer" : "not-allowed", fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s" }}
               >
-                {reportSubmitting ? "Saving…" : "Pin to map →"}
+                {imageUploading ? "Uploading photo…" : reportSubmitting ? "Saving…" : "Pin to map →"}
               </button>
             </div>
           </div>
