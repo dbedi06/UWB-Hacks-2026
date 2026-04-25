@@ -15,19 +15,14 @@ Your task:
 CRITICAL PRINCIPLE:
 Preserve WHY the issue matters to the reporter. Details about affected populations (children, elderly, disabled, commuters, pets), duration, recurrence, prior attempts to report, and personal stakes are what transform a ticket into a case. Put them in `impact_summary` and `tags`.
 
-CATEGORIES (pick exactly one; if nothing fits, use "other"):
-- pothole — road surface damage, cracks, sinkholes
+CATEGORIES (pick exactly one; use "other" for anything that doesn't clearly fit):
+- pothole — road surface damage, cracks, sinkholes, broken pavement
 - streetlight — non-functioning, flickering, or damaged street lighting
-- crosswalk_traffic — unsafe intersections, missing/broken signals, missing crosswalk paint, traffic hazards
-- sidewalk — damaged, blocked, flooded, or missing sidewalks; accessibility issues
-- graffiti_vandalism — tagging, property damage, broken public property
-- trash_dumping — illegal dumping, overflowing bins, persistent litter
-- water_sewer — leaks, flooding, sewage smells, blocked drains
-- trees_vegetation — fallen or leaning trees, dead trees, overgrowth blocking visibility
-- noise — persistent noise complaints (construction outside hours, chronic issues)
-- stray_animal — loose, injured, or dangerous animals
-- encampment — homeless encampments (treat sensitively; focus on reported concerns, not judgments)
-- other — doesn't fit any above category
+- crosswalk — unsafe intersections, missing/broken signals, missing crosswalk paint, pedestrian or traffic hazards at crossings
+- graffiti — tagging, vandalism, defaced or damaged public property
+- flooding — leaks, standing water, flooded streets or sidewalks, blocked storm drains, sewage smells
+- debris — illegal dumping, fallen branches or trees, persistent litter, blockage on roads or sidewalks, anything physically dangerous left in public space
+- other — doesn't fit any above category (e.g., loud noise, stray animals, encampments, accessibility issues, smells, anything else)
 
 SEVERITY:
 - low — aesthetic issue or minor inconvenience

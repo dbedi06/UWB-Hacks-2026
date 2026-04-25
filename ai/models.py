@@ -6,8 +6,11 @@ chat.completions.parse, so every field must be representable in strict
 JSON Schema.
 
 API-level response models (ReportResponse, LocationOut, etc.) live in
-voicemap/backend/models.py — they belong to the REST layer, not the AI
-pipeline.
+backend/models.py — they belong to the REST layer, not the AI pipeline.
+
+The Category Literal mirrors components/VoiceMap.jsx CATEGORIES exactly
+so the response.report.category drops straight into the frontend's
+CATEGORIES dict — no translation layer needed.
 """
 from pydantic import BaseModel, Field
 from typing import Literal
@@ -16,15 +19,10 @@ from typing import Literal
 Category = Literal[
     "pothole",
     "streetlight",
-    "crosswalk_traffic",
-    "sidewalk",
-    "graffiti_vandalism",
-    "trash_dumping",
-    "water_sewer",
-    "trees_vegetation",
-    "noise",
-    "stray_animal",
-    "encampment",
+    "crosswalk",
+    "graffiti",
+    "flooding",
+    "debris",
     "other",
 ]
 
