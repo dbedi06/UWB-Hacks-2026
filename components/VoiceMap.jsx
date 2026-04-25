@@ -235,19 +235,24 @@ export default function VoiceMap() {
     created_at: r.created_at || r.reported_at || new Date().toISOString(),
   });
 
+  // Pulls aggregated cluster heads (one row per cluster, with report_count)
+  // from /api/reports. Called on mount and after any successful submission
+  // so the map reflects server-side dedup without needing a manual refresh.
+  const refreshReports = useCallback(async () => {
+    try {
+      const res = await fetch("/api/reports");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.reports)) {
+        setReports(data.reports.map(normalizeReport));
+      }
+    } catch { /* keep current state */ }
+  }, []);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
-    (async () => {
-      try {
-        const res = await fetch("/api/reports");
-        if (!res.ok) return;
-        const data = await res.json();
-        if (Array.isArray(data.reports)) {
-          setReports(data.reports.map(normalizeReport));
-        }
-      } catch { /* keep seed data when API unavailable */ }
-    })();
-  }, []);
+    refreshReports();
+  }, [refreshReports]);
 
   // ─── Load Leaflet ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -502,7 +507,9 @@ export default function VoiceMap() {
         return;
       }
       const { report } = await res.json();
-      setReports(prev => [...prev, report]);
+      // Refetch the aggregated cluster list so this submission collapses
+      // into an existing pin if the server attached it to a cluster.
+      await refreshReports();
       setSelected(report);
       setPanelOpen(false);
       setClickedLatLng(null);
@@ -567,7 +574,9 @@ export default function VoiceMap() {
       if (!res.ok) throw new Error(data.error || "Failed to save report");
       const newReport = data.report;
       if (!newReport) throw new Error("Invalid response from server");
-      setReports(prev => [...prev, normalizeReport(newReport)]);
+      // Refetch the aggregated cluster list so this submission collapses
+      // into an existing pin if the server attached it to a cluster.
+      await refreshReports();
       setPanelOpen(false);
       setSelected(newReport);
       setClickedLatLng(null);
