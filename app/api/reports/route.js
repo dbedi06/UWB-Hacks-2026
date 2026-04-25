@@ -4,7 +4,8 @@ import {
   mapReportRowToClient,
   parseUuid,
   ISSUE_KEYS,
-  uiSeverityToDb,
+  ISSUE_KEY_TO_NAME,
+  sessionAnonEmail,
 } from "@/lib/reports";
 
 const SEVERITY_UI = new Set(["low", "medium", "high", "emergency"]);
@@ -28,9 +29,7 @@ function getBoundsFromUrl(request) {
 }
 
 /**
- * GET: active reports in a lat/lng bounding box.
- * Inlines the same filters as `get_reports_in_bounds` (DB/schemav2.sql) so we do not
- * cast to enum types in SQL — avoids `severity_level` / search_path issues on some connections.
+ * GET: reports in a lat/lng bounding box (`DB/schema.sql`: `report` + `issue_type`).
  */
 export async function GET(request) {
   const sql = getSql();
@@ -42,12 +41,19 @@ export async function GET(request) {
 
   try {
     const rows = await sql`
-      SELECT * FROM reports
+      SELECT
+        r.id,
+        r.latitude,
+        r.longitude,
+        r.severity_level_id,
+        r.description,
+        it.name AS issue_type_name
+      FROM report r
+      INNER JOIN issue_type it ON it.id = r.issue_type_id
       WHERE
-        status = 'active'
-        AND lat BETWEEN ${bounds.minLat}::double precision AND ${bounds.maxLat}::double precision
-        AND lng BETWEEN ${bounds.minLng}::double precision AND ${bounds.maxLng}::double precision
-      ORDER BY reported_at DESC
+        r.latitude BETWEEN ${bounds.minLat}::double precision AND ${bounds.maxLat}::double precision
+        AND r.longitude BETWEEN ${bounds.minLng}::double precision AND ${bounds.maxLng}::double precision
+      ORDER BY r.id DESC
     `;
     const reports = rows.map((row) => mapReportRowToClient(row));
     return Response.json({ reports });
@@ -58,7 +64,8 @@ export async function GET(request) {
 }
 
 /**
- * POST: insert a report and apply user-chosen priority via `set_report_severity` (schemav2).
+ * POST: insert one `report` row; resolve or create `app_user` (see `DB/schema.sql`).
+ * Anonymous: `sessionToken` UUID → stable `anon+<token>@voicemap.local` identity.
  */
 export async function POST(request) {
   const sql = getSql();
@@ -98,9 +105,16 @@ export async function POST(request) {
   const userUuid = parseUuid(body.userId ?? body.user_id ?? body.reporterUserId);
   const sessionToken = parseUuid(body.sessionToken ?? body.session_token);
 
-  if (!userUuid && !sessionToken) {
+  const email = typeof body.reporter?.email === "string" && body.reporter.email.trim() ? body.reporter.email.trim() : null;
+  const phone = typeof body.reporter?.phone === "string" && body.reporter.phone.trim() ? body.reporter.phone.trim() : null;
+  const displayName =
+    typeof body.reporter?.displayName === "string" && body.reporter.displayName.trim()
+      ? body.reporter.displayName.trim()
+      : null;
+
+  if (!userUuid && !email && !phone && !sessionToken) {
     return Response.json(
-      { error: "Provide a valid userId (UUID) or sessionToken (UUID) for anonymous reports." },
+      { error: "Provide userId, reporter email/phone, or sessionToken for identity." },
       { status: 400 }
     );
   }
@@ -113,31 +127,90 @@ export async function POST(request) {
     transcript: body.transcript,
   });
 
-  const dbSev = uiSeverityToDb(sev);
+  const typeName = ISSUE_KEY_TO_NAME[category];
+  if (!typeName) {
+    return Response.json({ error: "Invalid category." }, { status: 400 });
+  }
 
   try {
-    const [row] = await sql`
-      WITH new_row AS (
-        INSERT INTO reports (user_id, session_token, lat, lng, category, description)
-        VALUES (
-          ${userUuid}::uuid,
-          ${sessionToken}::uuid,
-          ${lat}::double precision,
-          ${lng}::double precision,
-          ${category}::varchar(100),
-          ${descriptionText}::text
-        )
-        RETURNING id
-      )
-      SELECT * FROM set_report_severity((SELECT id FROM new_row), ${dbSev}::severity_level)
-    `;
+    let userId;
+    let existing = null;
 
-    if (!row) {
-      return Response.json({ error: "Failed to create report." }, { status: 500 });
+    if (userUuid) {
+      [existing] = await sql`SELECT id FROM app_user WHERE id = ${userUuid}::uuid LIMIT 1`;
+    }
+    if (!existing && email) {
+      [existing] = await sql`SELECT id FROM app_user WHERE email = ${email} LIMIT 1`;
+    }
+    if (!existing && phone) {
+      [existing] = await sql`SELECT id FROM app_user WHERE phone = ${phone} LIMIT 1`;
+    }
+    if (!existing && sessionToken) {
+      const anonEmail = sessionAnonEmail(sessionToken);
+      [existing] = await sql`SELECT id FROM app_user WHERE email = ${anonEmail} LIMIT 1`;
     }
 
-    const report = mapReportRowToClient(row);
-    return Response.json({ report, id: report.id });
+    if (existing) {
+      userId = existing.id;
+      if (displayName) {
+        await sql`
+          UPDATE app_user
+          SET latitude = ${lat}, longitude = ${lng}, display_name = ${displayName}
+          WHERE id = ${userId}
+        `;
+      } else {
+        await sql`
+          UPDATE app_user
+          SET latitude = ${lat}, longitude = ${lng}
+          WHERE id = ${userId}
+        `;
+      }
+    } else {
+      const insertEmail = email || (sessionToken ? sessionAnonEmail(sessionToken) : null);
+      if (!insertEmail && !phone) {
+        return Response.json({ error: "Could not resolve app_user identity." }, { status: 400 });
+      }
+      const [inserted] = await sql`
+        INSERT INTO app_user (latitude, longitude, email, phone, display_name)
+        VALUES (${lat}, ${lng}, ${insertEmail}, ${phone}, ${displayName})
+        RETURNING id
+      `;
+      userId = inserted.id;
+    }
+
+    const [typeRow] = await sql`SELECT id FROM issue_type WHERE name = ${typeName} LIMIT 1`;
+    if (!typeRow) {
+      return Response.json({ error: `Unknown issue type: ${typeName}` }, { status: 500 });
+    }
+
+    const [row] = await sql`
+      INSERT INTO report (user_id, latitude, longitude, severity_level_id, description, issue_type_id)
+      VALUES (
+        ${userId}::uuid,
+        ${lat}::double precision,
+        ${lng}::double precision,
+        ${sev},
+        ${descriptionText}::text,
+        ${typeRow.id}
+      )
+      RETURNING id
+    `;
+
+    const [join] = await sql`
+      SELECT
+        r.id,
+        r.latitude,
+        r.longitude,
+        r.severity_level_id,
+        r.description,
+        it.name AS issue_type_name
+      FROM report r
+      INNER JOIN issue_type it ON it.id = r.issue_type_id
+      WHERE r.id = ${row.id}::uuid
+    `;
+
+    const report = { ...mapReportRowToClient(join), created_at: new Date().toISOString() };
+    return Response.json({ report, id: report.id, userId });
   } catch (e) {
     console.error(e);
     return Response.json({ error: "Failed to save report." }, { status: 500 });

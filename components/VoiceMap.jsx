@@ -347,7 +347,7 @@ export default function VoiceMap() {
     if (!recording && transcript) parseTranscript();
   }, [recording, transcript, parseTranscript]);
 
-  // ── Submit report (persists to Neon via /api/reports, schemav2) ────────────
+  // ── Submit report (persists to Neon via /api/reports, DB/schema.sql) ───────
   const submitReport = async () => {
     if (!clickedLatLng || !form.title.trim()) return;
     const sessionToken = ensureSessionToken();
@@ -456,7 +456,12 @@ export default function VoiceMap() {
         <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
           {reports
             .filter(r => (filter.category === "all" || r.category === filter.category) && (filter.severity === "all" || r.severity === filter.severity))
-            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+            .sort((a, b) => {
+              const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
+              const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
+              if (tB !== tA) return tB - tA;
+              return String(b.id).localeCompare(String(a.id));
+            })
             .map(r => {
               const c = CATEGORIES[r.category] || CATEGORIES.other;
               const s = SEVERITIES[r.severity] || SEVERITIES.low;
@@ -473,7 +478,7 @@ export default function VoiceMap() {
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                     <span style={{ fontSize: 9, fontFamily: "'DM Mono', monospace", background: s.color + "22", color: s.color, borderRadius: 3, padding: "1px 5px", textTransform: "uppercase", letterSpacing: "0.05em" }}>{r.severity}</span>
-                    <span style={{ fontSize: 10, color: "#6b7280" }}>{new Date(r.created_at).toLocaleDateString()}</span>
+                    <span style={{ fontSize: 10, color: "#6b7280" }}>{r.created_at ? new Date(r.created_at).toLocaleDateString() : "—"}</span>
                   </div>
                 </div>
               );
@@ -802,7 +807,7 @@ export default function VoiceMap() {
 
           <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
             <span style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", background: sev?.color + "22", color: sev?.color, borderRadius: 4, padding: "3px 8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>{selected.severity}</span>
-            <span style={{ fontSize: 10, color: "#6b7280", padding: "3px 0" }}>{new Date(selected.created_at).toLocaleString()}</span>
+            <span style={{ fontSize: 10, color: "#6b7280", padding: "3px 0" }}>{selected.created_at ? new Date(selected.created_at).toLocaleString() : "—"}</span>
           </div>
 
           {selected.impact_summary && (
