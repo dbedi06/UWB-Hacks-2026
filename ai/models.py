@@ -53,3 +53,9 @@ class ExtractedReport(BaseModel):
         description="One sentence preserving reporter's context and stakes"
     )
     confidence: float = Field(ge=0.0, le=1.0)
+    is_crime: bool = Field(
+        description="True if the report describes a criminal incident that "
+                    "warrants police involvement (active crime → 911; past "
+                    "but reportable, e.g. vandalism, theft → non-emergency "
+                    "police line). False for non-criminal civic issues."
+    )

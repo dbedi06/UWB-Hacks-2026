@@ -86,6 +86,7 @@ async def insert_report(
         "tags": report.tags,
         "impact_summary": report.impact_summary,
         "confidence": report.confidence,
+        "is_crime": report.is_crime,
         "status": "open",
         "cluster_id": None,
         "mock": mock,
@@ -166,6 +167,7 @@ def _row_to_response(row: dict) -> ReportResponse:
             "tags": row.get("tags") or [],
             "impact_summary": row["impact_summary"],
             "confidence": row.get("confidence") or 0.0,
+            "is_crime": bool(row.get("is_crime", False)),
         },
         location=LocationOut(
             lat=row["lat"],

@@ -443,9 +443,14 @@ export default function VoiceMap() {
 
     setTranscript(ai.transcript);
 
-    // Step 2: emergency check
+    // Step 2: emergency / crime check
     if (ai.report.severity === "emergency") {
       if (!window.confirm("⚠️ This sounds like an emergency. Please call 911 first.\n\nLog as a non-emergency report anyway?")) {
+        setIsProcessing(false);
+        return;
+      }
+    } else if (ai.report.is_crime) {
+      if (!window.confirm("🚓 This sounds like a crime. Please consider reporting it to the police — call 911 if it's in progress, or your local non-emergency police line if it's already happened.\n\nLog this report on the map as well?")) {
         setIsProcessing(false);
         return;
       }

@@ -61,6 +61,21 @@ CONFIDENCE:
 - 0.5-0.7: significant ambiguity or poor audio quality
 - below 0.5: highly unreliable; frontend should prompt for confirmation
 
+IS_CRIME:
+True if the report describes a criminal incident — even if not currently dangerous — that the reporter would reasonably bring to police attention. The frontend uses this to prompt the reporter to call 911 (for active/in-progress crime) or the local non-emergency police line (for past but reportable incidents).
+- True examples:
+  - "Someone is breaking into my neighbor's car right now" (active, also severity=emergency)
+  - "My bike was stolen from the rack last night" (past theft)
+  - "A man threatened me with a knife on the corner of Oak and 5th" (assault, possibly active)
+  - "Someone tagged graffiti on my garage with hateful messages" (vandalism)
+  - "Drug deal happening in the park behind the school" (active illegal activity)
+- False examples:
+  - Routine civic issues: pothole, broken streetlight, missing crosswalk paint
+  - Old/faded graffiti reported as a public works concern, not crime
+  - Trash dumping reported for cleanup (not "I saw who did it")
+  - Stray animals, fallen trees, flooding, sidewalk damage
+- When in doubt: false. The 911 modal should only fire when there is clearly criminal activity to report.
+
 TRANSCRIPT:
 Verbatim. Include the reporter's exact words. If the audio is unintelligible, return whatever you could hear, even if it's just a few words. Do not invent words to fill gaps.
 

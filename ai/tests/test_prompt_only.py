@@ -15,6 +15,8 @@ SAMPLES = [
     "There's a broken streetlight at Oak and 5th, been out three weeks, my kid walks this way to school.",
     "Huge pothole on Mission Street near 24th, almost blew my tire.",
     "Someone dumped a whole sofa and trash bags behind the library on Elm Street last night.",
+    "Someone tagged graffiti with hate speech all over the bus stop on Bothell Way.",
+    "My bike was stolen off the rack outside the library yesterday afternoon.",
 ]
 
 
@@ -30,6 +32,7 @@ async def main() -> None:
         print(f"   Tags:       {result.tags}")
         print(f"   Summary:    {result.impact_summary}")
         print(f"   Confidence: {result.confidence}")
+        print(f"   Is crime:   {result.is_crime}")
 
 
 if __name__ == "__main__":

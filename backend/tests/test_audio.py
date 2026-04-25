@@ -48,6 +48,7 @@ async def main() -> None:
     print(f"Tags:          {result.tags}")
     print(f"Impact:        {result.impact_summary}")
     print(f"Confidence:    {result.confidence}")
+    print(f"Is crime:      {result.is_crime}")
 
 
 if __name__ == "__main__":

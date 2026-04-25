@@ -21,6 +21,7 @@ SAMPLES: list[ExtractedReport] = [
         tags=["near_school", "affects_children", "recurring_issue"],
         impact_summary="Parent reports unlit intersection on child's walking route to school, outage persisting three weeks despite apparent neglect.",
         confidence=0.95,
+        is_crime=False,
     ),
     ExtractedReport(
         title="Pothole on Mission near 24th",
@@ -32,6 +33,7 @@ SAMPLES: list[ExtractedReport] = [
         tags=["affects_cyclists", "pedestrian_hazard"],
         impact_summary="Reporter describes a large pothole on Mission near 24th causing near-miss between cyclist and vehicle traffic.",
         confidence=0.9,
+        is_crime=False,
     ),
     ExtractedReport(
         title="Crosswalk signal broken at Valencia & 16th",
@@ -43,6 +45,7 @@ SAMPLES: list[ExtractedReport] = [
         tags=["affects_elderly", "pedestrian_hazard", "recurring_issue"],
         impact_summary="Broken crosswalk signal at Valencia and 16th has forced elderly residents to cross against active traffic for multiple days.",
         confidence=0.92,
+        is_crime=False,
     ),
 ]
 
