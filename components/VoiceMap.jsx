@@ -98,6 +98,7 @@ export default function VoiceMap() {
   const leafletRef = useRef(null);
   const tileLayerRef = useRef(null);
   const markersRef = useRef({});
+  const clusterRef = useRef(null);       // markercluster group for all pins
   const userRef = useRef(null);
   const recognitionRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -251,14 +252,30 @@ export default function VoiceMap() {
   // ─── Load Leaflet ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (typeof window === "undefined" || leafletRef.current) return;
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-    document.head.appendChild(link);
-    const script = document.createElement("script");
-    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-    script.onload = () => initMap();
-    document.head.appendChild(script);
+
+    // Leaflet base CSS + JS, then markercluster CSS + JS chained on top.
+    const cssHrefs = [
+      "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
+      "https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css",
+      "https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css",
+    ];
+    cssHrefs.forEach((href) => {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = href;
+      document.head.appendChild(link);
+    });
+
+    const leafletScript = document.createElement("script");
+    leafletScript.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    leafletScript.onload = () => {
+      // markercluster depends on Leaflet — load it after Leaflet finishes
+      const mcScript = document.createElement("script");
+      mcScript.src = "https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js";
+      mcScript.onload = () => initMap();
+      document.head.appendChild(mcScript);
+    };
+    document.head.appendChild(leafletScript);
   }, []);
 
   const initMap = useCallback(() => {
@@ -288,17 +305,41 @@ export default function VoiceMap() {
       setForm({ title: "", category: "pothole", other_type: "", severity: "medium", impact_summary: "" });
     });
 
+    // Cluster group: nearby pins collapse into a single counted icon. Single
+    // pins still render as their own SVG. Cluster icon uses the dominant
+    // category's color so the dark-themed map stays consistent.
+    const cluster = L.markerClusterGroup({
+      maxClusterRadius: 40,
+      showCoverageOnHover: true,
+      spiderfyOnMaxZoom: true,
+      iconCreateFunction: (c) => {
+        const count = c.getChildCount();
+        const cats = c.getAllChildMarkers().map(m => m._report?.category).filter(Boolean);
+        const tally = {};
+        cats.forEach(cat => { tally[cat] = (tally[cat] || 0) + 1; });
+        const dominant = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0];
+        const color = (CATEGORIES[dominant] || CATEGORIES.other).color;
+        return L.divIcon({
+          html: `<div style="background:${color};color:white;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid #1a1a2e;box-shadow:0 0 12px rgba(0,0,0,0.6);font-family:'DM Mono',monospace;font-weight:600;font-size:13px">${count}</div>`,
+          className: "vm-cluster",
+          iconSize: [40, 40],
+        });
+      },
+    });
+    map.addLayer(cluster);
+    clusterRef.current = cluster;
+
     leafletRef.current = map;
     setMapReady(true);
   }, []);
 
   // ─── Render markers ───────────────────────────────────────────────────────
   useEffect(() => {
-    if (!mapReady || !leafletRef.current) return;
+    if (!mapReady || !leafletRef.current || !clusterRef.current) return;
     const L = window.L;
-    const map = leafletRef.current;
+    const cluster = clusterRef.current;
 
-    Object.values(markersRef.current).forEach(m => map.removeLayer(m));
+    cluster.clearLayers();
     markersRef.current = {};
 
     reports
@@ -317,11 +358,12 @@ export default function VoiceMap() {
           iconAnchor: [size / 2, size + 10],
         });
         const marker = L.marker([report.lat, report.lng], { icon })
-          .addTo(map)
           .on("click", e => {
             L.DomEvent.stopPropagation(e);
             setSelected(report);
           });
+        marker._report = report; // used by cluster iconCreateFunction
+        cluster.addLayer(marker);
         markersRef.current[report.id] = marker;
       });
   }, [reports, filter, mapReady]);
