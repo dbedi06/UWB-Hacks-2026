@@ -1,6 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { parseUuid } from "@/lib/reports";
+
+const SESSION_KEY = "voicemap_session_token";
+
+function ensureSessionToken() {
+  if (typeof window === "undefined") return null;
+  let t = localStorage.getItem(SESSION_KEY);
+  if (!t || !parseUuid(t)) {
+    t = crypto.randomUUID();
+    localStorage.setItem(SESSION_KEY, t);
+  }
+  return t;
+}
 
 // ─── Category config ────────────────────────────────────────────────────────
 const CATEGORIES = {
@@ -91,6 +104,9 @@ export default function VoiceMap() {
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
+  const [reportError, setReportError] = useState("");
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+
   const mediaRecorderRef = useRef(null);
   const recognitionRef = useRef(null);
   const userRef = useRef(null);
@@ -162,6 +178,18 @@ export default function VoiceMap() {
   };
 
   useEffect(() => { if (alertsOpen && !geoLocation) requestGeolocation(); }, [alertsOpen]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    (async () => {
+      try {
+        const res = await fetch("/api/reports");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data.reports)) setReports(data.reports);
+      } catch { /* keep seed data when API unavailable */ }
+    })();
+  }, []);
 
   // ── Load Leaflet ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -319,33 +347,51 @@ export default function VoiceMap() {
     if (!recording && transcript) parseTranscript();
   }, [recording, transcript, parseTranscript]);
 
-  // ── Submit report ─────────────────────────────────────────────────────────
-  const submitReport = () => {
+  // ── Submit report (persists to Neon via /api/reports, schemav2) ────────────
+  const submitReport = async () => {
     if (!clickedLatLng || !form.title.trim()) return;
+    const sessionToken = ensureSessionToken();
+    if (!parseUuid(sessionToken)) {
+      setReportError("Session not ready. Please refresh the page.");
+      return;
+    }
 
     if (form.severity === "emergency") {
       if (!window.confirm("⚠️ This sounds like an emergency. Please call 911 first.\n\nDo you still want to log this as a non-emergency report for city records?")) return;
     }
 
-    const newReport = {
-      id: `r-${Date.now()}`,
-      lat: clickedLatLng.lat,
-      lng: clickedLatLng.lng,
-      category: form.category,
-      other_type: form.category === "other" ? form.other_type : undefined,
-      severity: form.severity,         // set by AI on backend; user can hint via voice
-      title: form.title,
-      location_description: `${clickedLatLng.lat.toFixed(5)}, ${clickedLatLng.lng.toFixed(5)}`,
-      impact_summary: form.impact_summary,
-      report_count: 1,                 // backend will aggregate
-      status: "open",                  // backend manages open/closed
-      created_at: new Date().toISOString(),
-    };
-
-    setReports(prev => [...prev, newReport]);
-    setPanelOpen(false);
-    setSelected(newReport);
-    setClickedLatLng(null);
+    setReportSubmitting(true);
+    setReportError("");
+    try {
+      const res = await fetch("/api/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lat: clickedLatLng.lat,
+          lng: clickedLatLng.lng,
+          title: form.title.trim(),
+          category: form.category,
+          severity: form.severity,
+          impactSummary: form.impact_summary,
+          otherIssueLabel: form.category === "other" ? form.other_type : undefined,
+          transcript: transcript || undefined,
+          sessionToken,
+          userId: parseUuid(user?.id) ?? undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to save report");
+      const newReport = data.report;
+      if (!newReport) throw new Error("Invalid response from server");
+      setReports(prev => [...prev, newReport]);
+      setPanelOpen(false);
+      setSelected(newReport);
+      setClickedLatLng(null);
+    } catch (e) {
+      setReportError(e instanceof Error ? e.message : "Failed to save report");
+    } finally {
+      setReportSubmitting(false);
+    }
   };
 
   // ── UI ────────────────────────────────────────────────────────────────────
@@ -889,18 +935,22 @@ export default function VoiceMap() {
                 </div>
               )}
 
+              {reportError && (
+                <div style={{ fontSize: 12, color: "#D45F5F", lineHeight: 1.4 }}>{reportError}</div>
+              )}
+
               <button
                 onClick={submitReport}
-                disabled={!form.title.trim()}
+                disabled={!form.title.trim() || reportSubmitting}
                 style={{
                   padding: "12px", borderRadius: 8, border: "none",
-                  background: form.title.trim() ? "linear-gradient(135deg, #3BBFA3, #4A9EE0)" : "#1f2937",
-                  color: form.title.trim() ? "#fff" : "#4b5563",
-                  fontSize: 13, fontWeight: 600, cursor: form.title.trim() ? "pointer" : "not-allowed",
+                  background: form.title.trim() && !reportSubmitting ? "linear-gradient(135deg, #3BBFA3, #4A9EE0)" : "#1f2937",
+                  color: form.title.trim() && !reportSubmitting ? "#fff" : "#4b5563",
+                  fontSize: 13, fontWeight: 600, cursor: form.title.trim() && !reportSubmitting ? "pointer" : "not-allowed",
                   fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s"
                 }}
               >
-                Pin to map →
+                {reportSubmitting ? "Saving…" : "Pin to map →"}
               </button>
             </div>
           </div>
