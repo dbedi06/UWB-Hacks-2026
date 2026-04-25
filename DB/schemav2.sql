@@ -87,6 +87,11 @@ CREATE TABLE reports (
   status         report_status NOT NULL DEFAULT 'pending',
   reported_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
+  -- AI-extracted richness
+  tags           TEXT[]  NOT NULL DEFAULT '{}',
+  confidence     REAL    CHECK (confidence IS NULL OR confidence BETWEEN 0 AND 1),
+  duration       TEXT,
+
   CONSTRAINT reports_identity_required CHECK (
     user_id IS NOT NULL OR session_token IS NOT NULL
   )
@@ -158,14 +163,13 @@ CREATE INDEX idx_reports_pending_ai ON reports (reported_at ASC)
 CREATE INDEX idx_notifications_pending ON notifications (status)
   WHERE status = 'pending';
 
+-- Tag filter — fast lookups like WHERE tags @> ARRAY['near_school']
+CREATE INDEX reports_tags_gin_idx ON reports USING GIN (tags);
 
 -- =============================================================
 -- FUNCTIONS — USERS
 -- =============================================================
 
--- Create a new registered user account.
--- Returns the full user row on success.
--- Raises an exception if email or phone is already taken.
 CREATE OR REPLACE FUNCTION create_user(
   p_email             VARCHAR(255),
   p_phone             VARCHAR(30),
@@ -188,7 +192,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 
--- Fetch a user by their UUID.
 CREATE OR REPLACE FUNCTION get_user(
   p_user_id UUID
 )
@@ -197,8 +200,6 @@ RETURNS users AS $$
 $$ LANGUAGE sql STABLE;
 
 
--- Look up a user by email or phone — used during login to
--- check if an account already exists before creating one.
 CREATE OR REPLACE FUNCTION find_user_by_contact(
   p_email VARCHAR(255) DEFAULT NULL,
   p_phone VARCHAR(30)  DEFAULT NULL
@@ -212,9 +213,6 @@ RETURNS users AS $$
 $$ LANGUAGE sql STABLE;
 
 
--- Update mutable user profile fields.
--- Only non-null arguments are applied, so callers can pass just
--- the fields they want to change.
 CREATE OR REPLACE FUNCTION update_user(
   p_user_id       UUID,
   p_email         VARCHAR(255)       DEFAULT NULL,
@@ -246,9 +244,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 
--- Delete a user account.
--- Their reports are preserved with user_id set to NULL.
--- Their subscriptions and notification logs are cascade-deleted.
 CREATE OR REPLACE FUNCTION delete_user(
   p_user_id UUID
 )
@@ -267,9 +262,6 @@ $$ LANGUAGE plpgsql;
 -- FUNCTIONS — REPORTS
 -- =============================================================
 
--- Submit a new report.
--- Pass p_user_id for authenticated users, p_session_token for
--- anonymous users. Returns the new report row in 'pending' state.
 CREATE OR REPLACE FUNCTION submit_report(
   p_lat            DOUBLE PRECISION,
   p_lng            DOUBLE PRECISION,
@@ -291,7 +283,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 
--- Fetch a single report by ID.
 CREATE OR REPLACE FUNCTION get_report(
   p_report_id UUID
 )
@@ -300,9 +291,6 @@ RETURNS reports AS $$
 $$ LANGUAGE sql STABLE;
 
 
--- Fetch all active reports within a lat/lng bounding box.
--- Used to populate the map for a given viewport.
--- All filter arguments are optional — pass NULL to skip.
 CREATE OR REPLACE FUNCTION get_reports_in_bounds(
   p_lat_min    DOUBLE PRECISION,
   p_lat_max    DOUBLE PRECISION,
@@ -323,9 +311,6 @@ RETURNS SETOF reports AS $$
 $$ LANGUAGE sql STABLE;
 
 
--- Pull the next batch of reports waiting for AI severity assessment.
--- The AI worker calls this, processes each report, then calls
--- set_report_severity() for each one. Batch size defaults to 50.
 CREATE OR REPLACE FUNCTION get_pending_reports(
   p_limit INT DEFAULT 50
 )
@@ -337,10 +322,6 @@ RETURNS SETOF reports AS $$
 $$ LANGUAGE sql STABLE;
 
 
--- AI worker calls this once it has assessed a report.
--- Sets severity and flips status to 'active', making the report
--- visible on the map. Also triggers notification dispatch by
--- calling queue_notifications_for_report() internally.
 CREATE OR REPLACE FUNCTION set_report_severity(
   p_report_id  UUID,
   p_severity   severity_level
@@ -358,7 +339,6 @@ BEGIN
     RAISE EXCEPTION 'Report % not found.', p_report_id;
   END IF;
 
-  -- Queue notifications for any subscriptions that overlap this report
   PERFORM queue_notifications_for_report(p_report_id);
 
   RETURN v_report;
@@ -366,12 +346,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 
--- Mark a report as resolved or dismissed.
--- 'resolved' = issue has been fixed.
--- 'dismissed' = duplicate or invalid submission.
 CREATE OR REPLACE FUNCTION close_report(
   p_report_id  UUID,
-  p_status     report_status  -- must be 'resolved' or 'dismissed'
+  p_status     report_status
 )
 RETURNS reports AS $$
 DECLARE
@@ -399,18 +376,15 @@ $$ LANGUAGE plpgsql;
 -- FUNCTIONS — SUBSCRIPTIONS
 -- =============================================================
 
--- Create a new location subscription.
--- Pass p_user_id for registered users, p_contact_override + 
--- p_contact_pref for anonymous subscribers.
 CREATE OR REPLACE FUNCTION create_subscription(
   p_center_lat       DOUBLE PRECISION,
   p_center_lng       DOUBLE PRECISION,
-  p_radius_meters    INT               DEFAULT 1000,
-  p_user_id          UUID              DEFAULT NULL,
-  p_contact_override VARCHAR(255)      DEFAULT NULL,
+  p_radius_meters    INT                DEFAULT 1000,
+  p_user_id          UUID               DEFAULT NULL,
+  p_contact_override VARCHAR(255)       DEFAULT NULL,
   p_contact_pref     contact_preference DEFAULT 'email',
-  p_category_filter  VARCHAR(100)[]    DEFAULT NULL,
-  p_min_severity     severity_level    DEFAULT NULL
+  p_category_filter  VARCHAR(100)[]     DEFAULT NULL,
+  p_min_severity     severity_level     DEFAULT NULL
 )
 RETURNS subscriptions AS $$
 DECLARE
@@ -433,7 +407,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 
--- Fetch all subscriptions belonging to a registered user.
 CREATE OR REPLACE FUNCTION get_user_subscriptions(
   p_user_id UUID
 )
@@ -444,13 +417,11 @@ RETURNS SETOF subscriptions AS $$
 $$ LANGUAGE sql STABLE;
 
 
--- Update mutable subscription fields.
--- Only non-null arguments are applied.
 CREATE OR REPLACE FUNCTION update_subscription(
   p_sub_id           UUID,
-  p_radius_meters    INT               DEFAULT NULL,
-  p_category_filter  VARCHAR(100)[]    DEFAULT NULL,
-  p_min_severity     severity_level    DEFAULT NULL,
+  p_radius_meters    INT                DEFAULT NULL,
+  p_category_filter  VARCHAR(100)[]     DEFAULT NULL,
+  p_min_severity     severity_level     DEFAULT NULL,
   p_contact_pref     contact_preference DEFAULT NULL
 )
 RETURNS subscriptions AS $$
@@ -474,7 +445,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 
--- Unsubscribe — cascades to the notifications log for this subscription.
 CREATE OR REPLACE FUNCTION delete_subscription(
   p_sub_id UUID
 )
@@ -493,11 +463,6 @@ $$ LANGUAGE plpgsql;
 -- FUNCTIONS — NOTIFICATIONS
 -- =============================================================
 
--- Called internally by set_report_severity().
--- Finds every subscription whose watch circle contains the report,
--- passes the severity and category filters, and inserts a pending
--- notification row for each match. The external worker then reads
--- these rows and does the actual email/SMS delivery.
 CREATE OR REPLACE FUNCTION queue_notifications_for_report(
   p_report_id UUID
 )
@@ -506,9 +471,7 @@ DECLARE
   v_report       reports;
   v_sub          subscriptions;
   v_channel      notification_channel;
-  v_contact      VARCHAR(255);
   v_queued       INT := 0;
-  -- Earth radius in metres, used for haversine distance
   v_earth_radius CONSTANT FLOAT := 6371000;
 BEGIN
   SELECT * INTO v_report FROM reports WHERE id = p_report_id;
@@ -516,26 +479,19 @@ BEGIN
   FOR v_sub IN
     SELECT * FROM subscriptions
     WHERE
-      -- Haversine distance check: report must fall within the subscription radius
       (v_earth_radius * 2 * ASIN(SQRT(
         POWER(SIN(RADIANS(v_report.lat - center_lat) / 2), 2) +
         COS(RADIANS(center_lat)) * COS(RADIANS(v_report.lat)) *
         POWER(SIN(RADIANS(v_report.lng - center_lng) / 2), 2)
       ))) <= radius_meters
-
-      -- Category filter: skip if subscription only watches specific categories
       AND (category_filter IS NULL OR v_report.category = ANY(category_filter))
-
-      -- Severity filter: skip if report severity ranks below the subscription minimum.
-      -- severity_level enum order is: low < moderate < high < emergency
       AND (
         min_severity IS NULL OR
         v_report.severity::TEXT >= min_severity::TEXT
       )
   LOOP
-    -- Resolve which channel to use for this subscription
     v_channel := CASE
-      WHEN v_sub.contact_preference = 'sms'  THEN 'sms'::notification_channel
+      WHEN v_sub.contact_preference = 'sms' THEN 'sms'::notification_channel
       ELSE 'email'::notification_channel
     END;
 
@@ -550,9 +506,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 
--- Pull pending notifications for the delivery worker.
--- Returns each notification joined with the contact address
--- so the worker has everything it needs in one query.
 CREATE OR REPLACE FUNCTION get_pending_notifications(
   p_limit INT DEFAULT 100
 )
@@ -587,8 +540,6 @@ RETURNS TABLE (
 $$ LANGUAGE sql STABLE;
 
 
--- Delivery worker calls this after each send attempt.
--- Sets status to 'sent' (with timestamp) or 'failed'.
 CREATE OR REPLACE FUNCTION mark_notification_sent(
   p_notification_id  UUID,
   p_success          BOOLEAN
@@ -608,8 +559,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 
--- Re-queue failed notifications so the worker retries them.
--- Resets status back to 'pending'. Call on a schedule or manually.
 CREATE OR REPLACE FUNCTION retry_failed_notifications()
 RETURNS INT AS $$
 DECLARE
