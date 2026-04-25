@@ -1,17 +1,25 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { parseUuid } from "@/lib/reports";
+
+// ─── Session token ────────────────────────────────────────────────────────────
+const SESSION_KEY = "voicemap_session_token";
+
+function ensureSessionToken() {
+  if (typeof window === "undefined") return null;
+  let t = localStorage.getItem(SESSION_KEY);
+  if (!t || !parseUuid(t)) {
+    t = crypto.randomUUID();
+    localStorage.setItem(SESSION_KEY, t);
+  }
+  return t;
+}
 
 // ─── Backend URL ──────────────────────────────────────────────────────────────
 const VOICEMAP_BACKEND = process.env.NEXT_PUBLIC_VOICEMAP_BACKEND || "http://localhost:8000";
 
-// ─── Session token (anonymous flow for voice submissions) ─────────────────────
-function getOrCreateSessionToken() {
-  const key = "voicemap_session";
-  let token = localStorage.getItem(key);
-  if (!token) { token = crypto.randomUUID(); localStorage.setItem(key, token); }
-  return token;
-}
+// ─── Category / severity config ───────────────────────────────────────────────
 const CATEGORIES = {
   pothole: { label: "Pothole", color: "#E07B39", icon: "🕳️" },
   streetlight: { label: "Streetlight", color: "#F5C842", icon: "💡" },
@@ -53,20 +61,28 @@ const SEED_REPORTS = [
   { id: "s12", lat: 47.7596, lng: -122.1999, category: "flooding", severity: "high", status: "active", report_count: 7, title: "Intersection floods every rainstorm", location_description: "47.75960, -122.19990", impact_summary: "Corner of Bothell Way & 102nd Ave NE, cars stall.", created_at: "2025-04-15T13:20:00Z" },
 ];
 
-// ─── Pin SVG — color driven by status ────────────────────────────────────────
-function createPinSVG(category, severity, status) {
+// ─── Pin SVG ─────────────────────────────────────────────────────────────────
+// Color is driven by status (active/pending); count badge from friends' version.
+function createPinSVG(category, severity, status, count = null) {
   const cat = CATEGORIES[category] || CATEGORIES.other;
   const sev = SEVERITIES[severity] || SEVERITIES.low;
   const color = STATUS_COLOR[status] || STATUS_COLOR.active;
   const r = sev.ring;
   const total = r * 2 + 6;
   const cx = total / 2;
+
+  const countBadge = count > 1 ? `
+    <circle cx="${total - 6}" cy="6" r="7" fill="#1a1a2e" stroke="white" stroke-width="1.5"/>
+    <text x="${total - 6}" y="6" text-anchor="middle" dominant-baseline="central" fill="white" font-size="8" font-family="monospace" font-weight="bold">${count}</text>
+  ` : "";
+
   return `
     <svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="${total + 10}" viewBox="0 0 ${total} ${total + 10}">
-      <circle cx="${cx}" cy="${cx}" r="${r}"   fill="${color}" fill-opacity="0.2" stroke="${color}" stroke-width="1.5"/>
+      <circle cx="${cx}" cy="${cx}" r="${r}"     fill="${color}" fill-opacity="0.2" stroke="${color}" stroke-width="1.5"/>
       <circle cx="${cx}" cy="${cx}" r="${r - 4}" fill="${color}" fill-opacity="0.9"/>
       <text x="${cx}" y="${cx}" text-anchor="middle" dominant-baseline="central" font-size="${r - 2}">${cat.icon}</text>
       <line x1="${cx}" y1="${cx + r - 2}" x2="${cx}" y2="${total + 8}" stroke="${color}" stroke-width="1.5" stroke-opacity="0.6"/>
+      ${countBadge}
     </svg>`;
 }
 
@@ -77,10 +93,11 @@ export default function VoiceMap() {
   const markersRef = useRef({});
   const userRef = useRef(null);
   const recognitionRef = useRef(null);
-  const mediaRecorderRef = useRef(null);  // captures raw audio for FastAPI
-  const audioChunksRef = useRef([]);    // accumulates audio data chunks
-  const isDraggingRef = useRef(false);   // ← drag-vs-click fix
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const isDraggingRef = useRef(false);   // drag-vs-click fix
 
+  // ── UI state ──────────────────────────────────────────────────────────────
   const [darkMode, setDarkMode] = useState(true);
   const [reports, setReports] = useState(SEED_REPORTS);
   const [selected, setSelected] = useState(null);
@@ -92,10 +109,14 @@ export default function VoiceMap() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [filter, setFilter] = useState({ category: "all", severity: "all" });
   const [mapReady, setMapReady] = useState(false);
+
+  // ── Alert state ───────────────────────────────────────────────────────────
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [geoLocation, setGeoLocation] = useState(null);
   const [geoError, setGeoError] = useState(false);
   const [alertPrefs, setAlertPrefs] = useState({ enabled: false, radius: 1, minSeverity: "medium" });
+
+  // ── Auth state ────────────────────────────────────────────────────────────
   const [user, setUser] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState("login");
@@ -103,9 +124,13 @@ export default function VoiceMap() {
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
+  // ── Report submission state (from friends' version) ───────────────────────
+  const [reportError, setReportError] = useState("");
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+
   useEffect(() => { userRef.current = user; }, [user]);
 
-  // ─── Theme ───────────────────────────────────────────────────────────────
+  // ─── Theme ────────────────────────────────────────────────────────────────
   const T = darkMode ? {
     pageBg: "#0d1117", sidebar: "#111827", card: "#1f2937", border: "#1f2937", border2: "#374151",
     text: "#e8e8e8", textMuted: "#6b7280", textDim: "#4b5563", textFaint: "#9ca3af",
@@ -116,16 +141,16 @@ export default function VoiceMap() {
     tiles: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
   };
 
-  // Swap tiles on theme change
+  // Swap tile layer on theme change
   useEffect(() => { if (tileLayerRef.current) tileLayerRef.current.setUrl(T.tiles); }, [darkMode]);
 
-  // ─── Auth ─────────────────────────────────────────────────────────────────
+  // ─── Auth handlers ────────────────────────────────────────────────────────
   const handleLogin = async () => {
     if (!authForm.username || !authForm.password) { setAuthError("Please enter your username and password."); return; }
     setAuthLoading(true); setAuthError("");
     try {
       // ── BACKEND HOOK: uncomment when ready ──
-      // const res  = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/auth/login`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ username:authForm.username, password:authForm.password }) });
+      // const res  = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: authForm.username, password: authForm.password }) });
       // const data = await res.json();
       // if (!res.ok) throw new Error(data.message || "Login failed");
       // setUser(data.user); // expects { id, username, email, phone, token }
@@ -145,7 +170,7 @@ export default function VoiceMap() {
     setAuthLoading(true); setAuthError("");
     try {
       // ── BACKEND HOOK: uncomment when ready ──
-      // const res  = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/auth/register`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ username:authForm.username, password:authForm.password, email:authForm.email||null, phone:authForm.phone||null }) });
+      // const res  = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/auth/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: authForm.username, password: authForm.password, email: authForm.email || null, phone: authForm.phone || null }) });
       // const data = await res.json();
       // if (!res.ok) throw new Error(data.message || "Signup failed");
       // setUser(data.user);
@@ -171,11 +196,25 @@ export default function VoiceMap() {
   };
   useEffect(() => { if (alertsOpen && !geoLocation) requestGeolocation(); }, [alertsOpen]);
 
+  // ─── Fetch live reports on mount (falls back to seed data) ───────────────
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    (async () => {
+      try {
+        const res = await fetch("/api/reports");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data.reports)) setReports(data.reports);
+      } catch { /* keep seed data when API unavailable */ }
+    })();
+  }, []);
+
   // ─── Load Leaflet ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (typeof window === "undefined" || leafletRef.current) return;
     const link = document.createElement("link");
-    link.rel = "stylesheet"; link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    link.rel = "stylesheet";
+    link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
     document.head.appendChild(link);
     const script = document.createElement("script");
     script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
@@ -188,18 +227,20 @@ export default function VoiceMap() {
     const map = L.map("voicemap-container", { center: BOTHELL_CENTER, zoom: 14, zoomControl: false });
 
     const tl = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      attribution: '&copy; <a href="https://carto.com/">CARTO</a>', subdomains: "abcd", maxZoom: 19,
+      attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+      subdomains: "abcd",
+      maxZoom: 19,
     }).addTo(map);
     tileLayerRef.current = tl;
 
     L.control.zoom({ position: "bottomright" }).addTo(map);
 
-    // ── Drag detection: flag while dragging so click handler ignores drag-end ──
+    // Drag-vs-click fix
     map.on("dragstart", () => { isDraggingRef.current = true; });
     map.on("dragend", () => { setTimeout(() => { isDraggingRef.current = false; }, 50); });
 
     map.on("click", e => {
-      if (isDraggingRef.current) return;                               // ← ignore drag releases
+      if (isDraggingRef.current) return;
       if (!userRef.current) { setAuthOpen(true); setAuthMode("login"); return; }
       setClickedLatLng({ lat: e.latlng.lat, lng: e.latlng.lng });
       setPanelOpen(true);
@@ -216,24 +257,39 @@ export default function VoiceMap() {
     if (!mapReady || !leafletRef.current) return;
     const L = window.L;
     const map = leafletRef.current;
+
     Object.values(markersRef.current).forEach(m => map.removeLayer(m));
     markersRef.current = {};
+
     reports
-      .filter(r => (filter.category === "all" || r.category === filter.category) && (filter.severity === "all" || r.severity === filter.severity))
+      .filter(r =>
+        (filter.category === "all" || r.category === filter.category) &&
+        (filter.severity === "all" || r.severity === filter.severity)
+      )
       .forEach(report => {
         const sev = SEVERITIES[report.severity] || SEVERITIES.low;
         const size = sev.ring * 2 + 6;
-        const icon = L.divIcon({ html: createPinSVG(report.category, report.severity, report.status), className: "", iconSize: [size, size + 10], iconAnchor: [size / 2, size + 10] });
-        const marker = L.marker([report.lat, report.lng], { icon }).addTo(map).on("click", () => setSelected(report));
+        const icon = L.divIcon({
+          html: createPinSVG(report.category, report.severity, report.status, report.report_count),
+          className: "",
+          iconSize: [size, size + 10],
+          iconAnchor: [size / 2, size + 10],
+        });
+        const marker = L.marker([report.lat, report.lng], { icon })
+          .addTo(map)
+          .on("click", () => setSelected(report));
         markersRef.current[report.id] = marker;
       });
   }, [reports, filter, mapReady]);
 
-  // ─── Voice recording — Leo's FastAPI pipeline ─────────────────────────────
+  // ─── Voice recording ──────────────────────────────────────────────────────
+  // Captures raw audio for FastAPI (Whisper + GPT-4o) while also using Web
+  // Speech API for a live transcript preview in the UI.
   const startRecording = async () => {
-    setRecording(true); setTranscript("");
+    setRecording(true);
+    setTranscript("");
 
-    // Capture raw audio for FastAPI (Whisper + GPT-4o)
+    // Raw audio capture for FastAPI pipeline
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mr = new MediaRecorder(stream);
@@ -250,11 +306,13 @@ export default function VoiceMap() {
       console.error("Microphone unavailable:", e);
     }
 
-    // Web Speech API for live transcript display only
+    // Web Speech API — live transcript display only
     if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
       const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
       const rec = new SR();
-      rec.continuous = false; rec.interimResults = true; rec.lang = "en-US";
+      rec.continuous = false;
+      rec.interimResults = true;
+      rec.lang = "en-US";
       rec.onresult = e => setTranscript(Array.from(e.results).map(r => r[0].transcript).join(" "));
       rec.onend = () => setRecording(false);
       rec.start();
@@ -270,7 +328,7 @@ export default function VoiceMap() {
     setRecording(false);
   };
 
-  // ─── Leo's full voice submission pipeline ─────────────────────────────────
+  // ─── FastAPI voice pipeline ───────────────────────────────────────────────
   const submitVoiceReport = async (audioBlob, mimeType) => {
     if (!clickedLatLng) return;
     setIsProcessing(true);
@@ -287,62 +345,79 @@ export default function VoiceMap() {
       if (!aiRes.ok) {
         const err = await aiRes.json().catch(() => ({}));
         alert(err.error || "AI extraction failed");
-        setIsProcessing(false); return;
+        setIsProcessing(false);
+        return;
       }
       ai = await aiRes.json();
     } catch (e) {
       alert("Could not reach the voice backend.");
-      setIsProcessing(false); return;
+      setIsProcessing(false);
+      return;
     }
 
     setTranscript(ai.transcript);
 
-    // Step 2: emergency check before persisting
+    // Step 2: emergency check
     if (ai.report.severity === "emergency") {
       if (!window.confirm("⚠️ This sounds like an emergency. Please call 911 first.\n\nLog as a non-emergency report anyway?")) {
-        setIsProcessing(false); return;
+        setIsProcessing(false);
+        return;
       }
     }
 
     // Step 3: low-confidence confirmation
     if (ai.report.confidence < 0.7) {
       if (!window.confirm(`I heard: "${ai.transcript}"\n\nDoes that look right?`)) {
-        setIsProcessing(false); return;
+        setIsProcessing(false);
+        return;
       }
     }
 
-    // Step 4: persist via Next.js /api/reports route
+    // Step 4: persist via Next.js /api/reports (same endpoint as manual form)
+    const sessionToken = ensureSessionToken();
     const body = {
-      lat: ai.location.lat, lng: ai.location.lng,
+      lat: ai.location.lat,
+      lng: ai.location.lng,
       title: ai.report.impact_summary,
       category: ai.report.category,
       severity: ai.report.severity,
       impactSummary: ai.report.impact_summary,
       transcript: ai.transcript,
-      sessionToken: getOrCreateSessionToken(),
+      sessionToken,
+      userId: parseUuid(userRef.current?.id) ?? undefined,
     };
 
     try {
-      const res = await fetch("/api/reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const res = await fetch("/api/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         alert(err.error || "Failed to save report.");
-        setIsProcessing(false); return;
+        setIsProcessing(false);
+        return;
       }
       const { report } = await res.json();
       setReports(prev => [...prev, report]);
       setSelected(report);
       setPanelOpen(false);
       setClickedLatLng(null);
-    } catch (e) {
-      // Fallback: drop a local pin if /api/reports isn't wired yet
+    } catch {
+      // Fallback local pin if /api/reports isn't wired yet
       const localReport = {
-        id: `r-${Date.now()}`, lat: ai.location.lat, lng: ai.location.lng,
-        category: ai.report.category, severity: ai.report.severity,
+        id: `r-${Date.now()}`,
+        lat: ai.location.lat,
+        lng: ai.location.lng,
+        category: ai.report.category,
+        severity: ai.report.severity,
+        status: "active",
         title: ai.report.impact_summary,
         location_description: `${ai.location.lat.toFixed(5)}, ${ai.location.lng.toFixed(5)}`,
         impact_summary: ai.report.impact_summary,
-        report_count: 1, status: "active", created_at: new Date().toISOString(),
+        report_count: 1,
+        created_at: new Date().toISOString(),
       };
       setReports(prev => [...prev, localReport]);
       setSelected(localReport);
@@ -353,48 +428,114 @@ export default function VoiceMap() {
     }
   };
 
-
-  const submitReport = () => {
+  // ─── Manual form submission ───────────────────────────────────────────────
+  const submitReport = async () => {
     if (!clickedLatLng || !form.title.trim()) return;
-    if (form.severity === "emergency" && !window.confirm("⚠️ This sounds like an emergency. Please call 911 first.\n\nStill log it for city records?")) return;
-    const newReport = {
-      id: `r-${Date.now()}`, lat: clickedLatLng.lat, lng: clickedLatLng.lng,
-      category: form.category, other_type: form.category === "other" ? form.other_type : undefined,
-      severity: form.severity, title: form.title,
-      location_description: `${clickedLatLng.lat.toFixed(5)}, ${clickedLatLng.lng.toFixed(5)}`,
-      impact_summary: form.impact_summary,
-      report_count: 1, status: "active",
-      created_at: new Date().toISOString(),
-    };
-    setReports(prev => [...prev, newReport]);
-    setPanelOpen(false); setSelected(newReport); setClickedLatLng(null);
+
+    const sessionToken = ensureSessionToken();
+    if (!parseUuid(sessionToken)) {
+      setReportError("Session not ready. Please refresh the page.");
+      return;
+    }
+
+    if (form.severity === "emergency") {
+      if (!window.confirm("⚠️ This sounds like an emergency. Please call 911 first.\n\nDo you still want to log this as a non-emergency report for city records?")) return;
+    }
+
+    setReportSubmitting(true);
+    setReportError("");
+
+    try {
+      const res = await fetch("/api/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lat: clickedLatLng.lat,
+          lng: clickedLatLng.lng,
+          title: form.title.trim(),
+          category: form.category,
+          severity: form.severity,
+          impactSummary: form.impact_summary,
+          otherIssueLabel: form.category === "other" ? form.other_type : undefined,
+          transcript: transcript || undefined,
+          sessionToken,
+          userId: parseUuid(user?.id) ?? undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to save report");
+      const newReport = data.report;
+      if (!newReport) throw new Error("Invalid response from server");
+      setReports(prev => [...prev, newReport]);
+      setPanelOpen(false);
+      setSelected(newReport);
+      setClickedLatLng(null);
+    } catch (e) {
+      // Fallback: drop local pin if backend isn't wired yet
+      const localReport = {
+        id: `r-${Date.now()}`,
+        lat: clickedLatLng.lat,
+        lng: clickedLatLng.lng,
+        category: form.category,
+        other_type: form.category === "other" ? form.other_type : undefined,
+        severity: form.severity,
+        status: "active",
+        title: form.title.trim(),
+        location_description: `${clickedLatLng.lat.toFixed(5)}, ${clickedLatLng.lng.toFixed(5)}`,
+        impact_summary: form.impact_summary,
+        report_count: 1,
+        created_at: new Date().toISOString(),
+      };
+      setReports(prev => [...prev, localReport]);
+      setPanelOpen(false);
+      setSelected(localReport);
+      setClickedLatLng(null);
+      // Only surface genuine errors (not the fallback path)
+      if (e.message !== "Failed to fetch") setReportError(e.message);
+    } finally {
+      setReportSubmitting(false);
+    }
   };
 
-  // ─── Helpers ──────────────────────────────────────────────────────────────
+  // ─── Derived helpers ──────────────────────────────────────────────────────
   const cat = selected ? (CATEGORIES[selected.category] || CATEGORIES.other) : null;
   const sev = selected ? (SEVERITIES[selected.severity] || SEVERITIES.low) : null;
-  const inputStyle = { background: T.card, border: `1px solid ${T.border2}`, borderRadius: 8, color: T.text, fontSize: 13, padding: "10px 12px", outline: "none", fontFamily: "'DM Sans', sans-serif" };
-  const modalBox = { width: "100%", background: T.sidebar, borderRadius: 16, border: `1px solid ${T.border}`, padding: 28, boxShadow: "0 24px 64px rgba(0,0,0,0.8)", animation: "slideUp 0.25s ease" };
-  const closeBtn = { background: T.card, border: "none", borderRadius: 6, color: T.textFaint, fontSize: 16, cursor: "pointer", padding: "4px 10px" };
+
+  const inputStyle = {
+    background: T.card, border: `1px solid ${T.border2}`, borderRadius: 8,
+    color: T.text, fontSize: 13, padding: "10px 12px", outline: "none",
+    fontFamily: "'DM Sans', sans-serif",
+  };
+  const modalBox = {
+    width: "100%", background: T.sidebar, borderRadius: 16,
+    border: `1px solid ${T.border}`, padding: 28,
+    boxShadow: "0 24px 64px rgba(0,0,0,0.8)", animation: "slideUp 0.25s ease",
+  };
+  const closeBtn = {
+    background: T.card, border: "none", borderRadius: 6,
+    color: T.textFaint, fontSize: 16, cursor: "pointer", padding: "4px 10px",
+  };
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "'DM Sans', sans-serif", background: T.pageBg, color: T.text, position: "relative", overflow: "hidden" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
-        @keyframes slideUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
-        ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:transparent} ::-webkit-scrollbar-thumb{background:${T.border2};border-radius:4px}
+        @keyframes slideUp { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
+        ::-webkit-scrollbar { width: 4px }
+        ::-webkit-scrollbar-track { background: transparent }
+        ::-webkit-scrollbar-thumb { background: ${T.border2}; border-radius: 4px }
       `}</style>
 
-      {/* ── Sidebar ───────────────────────────────────────────────── */}
+      {/* ── Sidebar ──────────────────────────────────────────────── */}
       <aside style={{ width: 260, background: T.sidebar, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", zIndex: 10, flexShrink: 0 }}>
 
         {/* Logo */}
         <div style={{ padding: "20px 20px 16px", borderBottom: `1px solid ${T.border}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 32, height: 32, background: "linear-gradient(135deg,#3BBFA3,#4A9EE0)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📍</div>
+            <div style={{ width: 32, height: 32, background: "linear-gradient(135deg, #3BBFA3, #4A9EE0)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📍</div>
             <div>
-              <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 16, fontWeight: 500, letterSpacing: "-0.02em", color: T.text }}>VoiceMap</div>
+              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 16, fontWeight: 500, letterSpacing: "-0.02em", color: T.text }}>VoiceMap</div>
               <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: "0.08em", textTransform: "uppercase" }}>Bothell, WA</div>
             </div>
           </div>
@@ -407,7 +548,7 @@ export default function VoiceMap() {
             { label: "Active", value: reports.filter(r => r.status === "active").length },
           ].map(s => (
             <div key={s.label} style={{ background: T.card, borderRadius: 8, padding: "8px 10px" }}>
-              <div style={{ fontSize: 20, fontWeight: 600, fontFamily: "'DM Mono',monospace", color: T.text }}>{s.value}</div>
+              <div style={{ fontSize: 20, fontWeight: 600, fontFamily: "'DM Mono', monospace", color: T.text }}>{s.value}</div>
               <div style={{ fontSize: 10, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.06em" }}>{s.label}</div>
             </div>
           ))}
@@ -441,7 +582,10 @@ export default function VoiceMap() {
         {/* Report list */}
         <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
           {reports
-            .filter(r => (filter.category === "all" || r.category === filter.category) && (filter.severity === "all" || r.severity === filter.severity))
+            .filter(r =>
+              (filter.category === "all" || r.category === filter.category) &&
+              (filter.severity === "all" || r.severity === filter.severity)
+            )
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
             .map(r => {
               const c = CATEGORIES[r.category] || CATEGORIES.other;
@@ -449,15 +593,17 @@ export default function VoiceMap() {
               const sc = STATUS_COLOR[r.status] || STATUS_COLOR.active;
               const isActive = selected?.id === r.id;
               return (
-                <div key={r.id} onClick={() => { setSelected(r); leafletRef.current?.flyTo([r.lat, r.lng], 16, { duration: 0.8 }); }}
-                  style={{ padding: "10px 16px", cursor: "pointer", borderLeft: `3px solid ${isActive ? sc : "transparent"}`, background: isActive ? T.card : "transparent", transition: "all 0.15s" }}>
+                <div key={r.id}
+                  onClick={() => { setSelected(r); leafletRef.current?.flyTo([r.lat, r.lng], 16, { duration: 0.8 }); }}
+                  style={{ padding: "10px 16px", cursor: "pointer", borderLeft: `3px solid ${isActive ? sc : "transparent"}`, background: isActive ? T.card : "transparent", transition: "all 0.15s" }}
+                >
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
                     <span style={{ fontSize: 13 }}>{c.icon}</span>
                     <span style={{ fontSize: 12, fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.text }}>{r.title}</span>
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <span style={{ fontSize: 9, fontFamily: "'DM Mono',monospace", background: sc + "22", color: sc, borderRadius: 3, padding: "1px 5px", textTransform: "uppercase", letterSpacing: "0.05em" }}>{r.status}</span>
-                    <span style={{ fontSize: 9, fontFamily: "'DM Mono',monospace", background: s.color + "22", color: s.color, borderRadius: 3, padding: "1px 5px", textTransform: "uppercase", letterSpacing: "0.05em" }}>{r.severity}</span>
+                    <span style={{ fontSize: 9, fontFamily: "'DM Mono', monospace", background: sc + "22", color: sc, borderRadius: 3, padding: "1px 5px", textTransform: "uppercase", letterSpacing: "0.05em" }}>{r.status}</span>
+                    <span style={{ fontSize: 9, fontFamily: "'DM Mono', monospace", background: s.color + "22", color: s.color, borderRadius: 3, padding: "1px 5px", textTransform: "uppercase", letterSpacing: "0.05em" }}>{r.severity}</span>
                     <span style={{ fontSize: 10, color: T.textMuted }}>{new Date(r.created_at).toLocaleDateString()}</span>
                   </div>
                 </div>
@@ -472,7 +618,8 @@ export default function VoiceMap() {
               <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 8, lineHeight: 1.5 }}>
                 Signed in as <span style={{ color: T.text, fontWeight: 500 }}>{user.username}</span>. Click the map to report.
               </div>
-              <button onClick={handleLogout} style={{ width: "100%", padding: "8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "transparent", color: T.textMuted, fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+              <button onClick={handleLogout}
+                style={{ width: "100%", padding: "8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "transparent", color: T.textMuted, fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>
                 Sign out
               </button>
             </div>
@@ -481,11 +628,11 @@ export default function VoiceMap() {
               <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 10px", lineHeight: 1.5 }}>Sign in to report issues or subscribe to alerts.</p>
               <div style={{ display: "flex", gap: 6 }}>
                 <button onClick={() => { setAuthMode("login"); setAuthOpen(true); setAuthError(""); }}
-                  style={{ flex: 1, padding: "8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: T.card, color: T.text, fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontWeight: 500 }}>
+                  style={{ flex: 1, padding: "8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: T.card, color: T.text, fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}>
                   Sign in
                 </button>
                 <button onClick={() => { setAuthMode("signup"); setAuthOpen(true); setAuthError(""); }}
-                  style={{ flex: 1, padding: "8px", borderRadius: 6, border: "none", background: "linear-gradient(135deg,#3BBFA3,#4A9EE0)", color: "#fff", fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontWeight: 600 }}>
+                  style={{ flex: 1, padding: "8px", borderRadius: 6, border: "none", background: "linear-gradient(135deg, #3BBFA3, #4A9EE0)", color: "#fff", fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>
                   Sign up
                 </button>
               </div>
@@ -500,7 +647,7 @@ export default function VoiceMap() {
       {/* ── Alerts button ─────────────────────────────────────────── */}
       <button
         onClick={() => { if (!user) { setAuthMode("login"); setAuthOpen(true); setAuthError(""); } else setAlertsOpen(true); }}
-        style={{ position: "absolute", top: 20, right: 20, zIndex: 1000, background: T.sidebar, border: `1px solid ${T.border2}`, borderRadius: 8, color: T.text, fontSize: 13, fontWeight: 600, padding: "10px 18px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.3)", fontFamily: "'DM Sans',sans-serif", transition: "all 0.15s" }}
+        style={{ position: "absolute", top: 20, right: 20, zIndex: 1000, background: T.sidebar, border: `1px solid ${T.border2}`, borderRadius: 8, color: T.text, fontSize: 13, fontWeight: 600, padding: "10px 18px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.3)", fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s" }}
         onMouseEnter={e => e.currentTarget.style.borderColor = "#3BBFA3"}
         onMouseLeave={e => e.currentTarget.style.borderColor = T.border2}
       >
@@ -533,23 +680,20 @@ export default function VoiceMap() {
             <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", color: T.textMuted, fontSize: 18, cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
           </div>
 
-          {/* Status + severity badges */}
           <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-            {/* Status badge */}
-            <span style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", background: (STATUS_COLOR[selected.status] || "#D45F5F") + "22", color: STATUS_COLOR[selected.status] || "#D45F5F", borderRadius: 4, padding: "3px 8px", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>
+            <span style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", background: (STATUS_COLOR[selected.status] || "#D45F5F") + "22", color: STATUS_COLOR[selected.status] || "#D45F5F", borderRadius: 4, padding: "3px 8px", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>
               {selected.status === "active" ? "🔴 Active" : "🟡 Pending fix"}
             </span>
-            <span style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", background: sev?.color + "22", color: sev?.color, borderRadius: 4, padding: "3px 8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            <span style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", background: sev?.color + "22", color: sev?.color, borderRadius: 4, padding: "3px 8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
               {selected.severity}
             </span>
             <span style={{ fontSize: 10, color: T.textMuted, padding: "3px 0" }}>{new Date(selected.created_at).toLocaleString()}</span>
           </div>
 
-          {/* Report count */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12, padding: "6px 10px", background: T.card, borderRadius: 6 }}>
             <span style={{ fontSize: 13 }}>📊</span>
             <span style={{ fontSize: 12, color: T.textMuted }}>
-              <span style={{ color: T.text, fontWeight: 600, fontFamily: "'DM Mono',monospace" }}>{selected.report_count}</span>
+              <span style={{ color: T.text, fontWeight: 600, fontFamily: "'DM Mono', monospace" }}>{selected.report_count}</span>
               {" "}report{selected.report_count !== 1 ? "s" : ""} submitted
             </span>
           </div>
@@ -559,7 +703,7 @@ export default function VoiceMap() {
               {selected.impact_summary}
             </p>
           )}
-          <div style={{ fontSize: 10, color: T.textDim, fontFamily: "'DM Mono',monospace" }}>
+          <div style={{ fontSize: 10, color: T.textDim, fontFamily: "'DM Mono', monospace" }}>
             {selected.lat.toFixed(5)}, {selected.lng.toFixed(5)}
           </div>
         </div>
@@ -586,9 +730,11 @@ export default function VoiceMap() {
                   <input value={authForm.phone} onChange={e => setAuthForm(f => ({ ...f, phone: e.target.value }))} placeholder="Phone number (optional)" type="tel" autoComplete="tel" style={inputStyle} />
                 </>
               )}
-              {authError && <div style={{ fontSize: 12, color: "#D45F5F", background: "#D45F5F11", border: "1px solid #D45F5F33", borderRadius: 6, padding: "8px 10px" }}>{authError}</div>}
+              {authError && (
+                <div style={{ fontSize: 12, color: "#D45F5F", background: "#D45F5F11", border: "1px solid #D45F5F33", borderRadius: 6, padding: "8px 10px" }}>{authError}</div>
+              )}
               <button onClick={authMode === "login" ? handleLogin : handleSignup} disabled={authLoading}
-                style={{ marginTop: 4, padding: "12px", borderRadius: 8, border: "none", background: authLoading ? T.card : "linear-gradient(135deg,#3BBFA3,#4A9EE0)", color: authLoading ? T.textDim : "#fff", fontSize: 13, fontWeight: 600, cursor: authLoading ? "not-allowed" : "pointer", fontFamily: "'DM Sans',sans-serif", transition: "all 0.15s" }}>
+                style={{ marginTop: 4, padding: "12px", borderRadius: 8, border: "none", background: authLoading ? T.card : "linear-gradient(135deg, #3BBFA3, #4A9EE0)", color: authLoading ? T.textDim : "#fff", fontSize: 13, fontWeight: 600, cursor: authLoading ? "not-allowed" : "pointer", fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s" }}>
                 {authLoading ? "Please wait…" : authMode === "login" ? "Sign in →" : "Create account →"}
               </button>
               <div style={{ textAlign: "center", fontSize: 12, color: T.textMuted, marginTop: 4 }}>
@@ -617,13 +763,14 @@ export default function VoiceMap() {
               <div style={{ textAlign: "center", padding: "24px 0" }}>
                 <div style={{ fontSize: 32, marginBottom: 12 }}>📍</div>
                 <div style={{ fontSize: 13, color: T.textFaint, marginBottom: 16, lineHeight: 1.6 }}>Please enable location permissions to use this feature.</div>
-                <button onClick={requestGeolocation} style={{ padding: "10px 20px", borderRadius: 8, border: "1px solid #3BBFA3", background: "#3BBFA322", color: "#3BBFA3", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                <button onClick={requestGeolocation}
+                  style={{ padding: "10px 20px", borderRadius: 8, border: "1px solid #3BBFA3", background: "#3BBFA322", color: "#3BBFA3", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>
                   Enable Location Access
                 </button>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                <div style={{ fontSize: 11, color: "#3BBFA3", fontFamily: "'DM Mono',monospace", background: "#3BBFA311", borderRadius: 6, padding: "6px 10px" }}>
+                <div style={{ fontSize: 11, color: "#3BBFA3", fontFamily: "'DM Mono', monospace", background: "#3BBFA311", borderRadius: 6, padding: "6px 10px" }}>
                   ✓ Location detected: {geoLocation.lat.toFixed(4)}, {geoLocation.lng.toFixed(4)}
                 </div>
                 <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
@@ -640,7 +787,7 @@ export default function VoiceMap() {
                       <div style={{ display: "flex", gap: 8 }}>
                         {[0.25, 0.5, 1, 2, 5].map(r => (
                           <button key={r} onClick={() => setAlertPrefs(p => ({ ...p, radius: r }))}
-                            style={{ flex: 1, padding: "8px 0", borderRadius: 6, fontSize: 11, fontWeight: 600, border: `1px solid ${alertPrefs.radius === r ? "#3BBFA3" : T.border2}`, background: alertPrefs.radius === r ? "#3BBFA322" : T.card, color: alertPrefs.radius === r ? "#3BBFA3" : T.textFaint, cursor: "pointer", fontFamily: "'DM Mono',monospace" }}>
+                            style={{ flex: 1, padding: "8px 0", borderRadius: 6, fontSize: 11, fontWeight: 600, border: `1px solid ${alertPrefs.radius === r ? "#3BBFA3" : T.border2}`, background: alertPrefs.radius === r ? "#3BBFA322" : T.card, color: alertPrefs.radius === r ? "#3BBFA3" : T.textFaint, cursor: "pointer", fontFamily: "'DM Mono', monospace" }}>
                             {r}mi
                           </button>
                         ))}
@@ -653,7 +800,7 @@ export default function VoiceMap() {
                           const active = alertPrefs.minSeverity === k;
                           return (
                             <button key={k} onClick={() => setAlertPrefs(p => ({ ...p, minSeverity: k }))}
-                              style={{ flex: 1, padding: "8px 0", borderRadius: 6, fontSize: 11, fontWeight: 600, border: `1px solid ${active ? v.color : v.color + "44"}`, background: active ? v.color + "33" : T.card, color: v.color, cursor: "pointer", fontFamily: "'DM Mono',monospace" }}>
+                              style={{ flex: 1, padding: "8px 0", borderRadius: 6, fontSize: 11, fontWeight: 600, border: `1px solid ${active ? v.color : v.color + "44"}`, background: active ? v.color + "33" : T.card, color: v.color, cursor: "pointer", fontFamily: "'DM Mono', monospace" }}>
                               {v.label}
                             </button>
                           );
@@ -665,7 +812,8 @@ export default function VoiceMap() {
                     </div>
                   </>
                 )}
-                <button onClick={() => setAlertsOpen(false)} style={{ padding: "12px", borderRadius: 8, border: "none", background: "linear-gradient(135deg,#3BBFA3,#4A9EE0)", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                <button onClick={() => setAlertsOpen(false)}
+                  style={{ padding: "12px", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #3BBFA3, #4A9EE0)", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>
                   Save preferences
                 </button>
               </div>
@@ -681,20 +829,33 @@ export default function VoiceMap() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: T.text }}>Report an issue</div>
-                {clickedLatLng && <div style={{ fontSize: 11, color: T.textMuted, fontFamily: "'DM Mono',monospace", marginTop: 2 }}>{clickedLatLng.lat.toFixed(5)}, {clickedLatLng.lng.toFixed(5)}</div>}
+                {clickedLatLng && (
+                  <div style={{ fontSize: 11, color: T.textMuted, fontFamily: "'DM Mono', monospace", marginTop: 2 }}>
+                    {clickedLatLng.lat.toFixed(5)}, {clickedLatLng.lng.toFixed(5)}
+                  </div>
+                )}
               </div>
               <button onClick={() => setPanelOpen(false)} style={closeBtn}>×</button>
             </div>
 
             {/* Voice button */}
             <div style={{ marginBottom: 16 }}>
-              <button onMouseDown={startRecording} onMouseUp={stopRecording} onTouchStart={startRecording} onTouchEnd={stopRecording}
-                style={{ width: "100%", padding: "14px", borderRadius: 10, border: `2px solid ${recording ? "#3BBFA3" : T.border2}`, background: recording ? "#3BBFA322" : T.card, color: recording ? "#3BBFA3" : T.textFaint, fontSize: 13, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, transition: "all 0.15s", fontFamily: "'DM Sans',sans-serif" }}>
+              <button
+                onMouseDown={startRecording} onMouseUp={stopRecording}
+                onTouchStart={startRecording} onTouchEnd={stopRecording}
+                style={{ width: "100%", padding: "14px", borderRadius: 10, border: `2px solid ${recording ? "#3BBFA3" : T.border2}`, background: recording ? "#3BBFA322" : T.card, color: recording ? "#3BBFA3" : T.textFaint, fontSize: 13, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, transition: "all 0.15s", fontFamily: "'DM Sans', sans-serif" }}
+              >
                 <span style={{ fontSize: 18 }}>{recording ? "🔴" : "🎙️"}</span>
                 {recording ? "Recording… release to stop" : "Hold to record voice report"}
               </button>
-              {isProcessing && <div style={{ textAlign: "center", fontSize: 11, color: T.textMuted, marginTop: 8 }}>Parsing with AI…</div>}
-              {transcript && !recording && <div style={{ marginTop: 8, padding: "8px 12px", background: T.card, borderRadius: 8, fontSize: 11, color: T.textFaint, lineHeight: 1.5, fontStyle: "italic" }}>"{transcript}"</div>}
+              {isProcessing && (
+                <div style={{ textAlign: "center", fontSize: 11, color: T.textMuted, marginTop: 8 }}>Parsing with AI…</div>
+              )}
+              {transcript && !recording && (
+                <div style={{ marginTop: 8, padding: "8px 12px", background: T.card, borderRadius: 8, fontSize: 11, color: T.textFaint, lineHeight: 1.5, fontStyle: "italic" }}>
+                  "{transcript}"
+                </div>
+              )}
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
@@ -704,9 +865,15 @@ export default function VoiceMap() {
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Short description (e.g. 'Broken streetlight at Oak & 5th')" style={inputStyle} />
+              <input
+                value={form.title}
+                onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                placeholder="Short description (e.g. 'Broken streetlight at Oak & 5th')"
+                style={inputStyle}
+              />
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} style={{ ...inputStyle, fontSize: 12, padding: "10px" }}>
+                <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                  style={{ ...inputStyle, fontSize: 12, padding: "10px" }}>
                   {Object.entries(CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
                 </select>
                 <select value={form.severity} onChange={e => setForm(f => ({ ...f, severity: e.target.value }))}
@@ -715,18 +882,35 @@ export default function VoiceMap() {
                 </select>
               </div>
               {form.category === "other" && (
-                <input value={form.other_type} onChange={e => setForm(f => ({ ...f, other_type: e.target.value }))} placeholder="Describe the issue type (e.g. 'Broken bench')" style={inputStyle} />
+                <input
+                  value={form.other_type}
+                  onChange={e => setForm(f => ({ ...f, other_type: e.target.value }))}
+                  placeholder="Describe the issue type (e.g. 'Broken bench', 'Missing sign')"
+                  style={inputStyle}
+                />
               )}
-              <textarea value={form.impact_summary} onChange={e => setForm(f => ({ ...f, impact_summary: e.target.value }))} placeholder="Additional details or context (optional)" rows={2}
-                style={{ ...inputStyle, fontSize: 12, resize: "vertical", lineHeight: 1.5 }} />
+              <textarea
+                value={form.impact_summary}
+                onChange={e => setForm(f => ({ ...f, impact_summary: e.target.value }))}
+                placeholder="Additional details or context (optional)"
+                rows={2}
+                style={{ ...inputStyle, fontSize: 12, resize: "vertical", lineHeight: 1.5 }}
+              />
               {form.severity === "emergency" && (
                 <div style={{ background: "#D45F5F22", border: "1px solid #D45F5F55", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "#D45F5F", display: "flex", gap: 8 }}>
-                  <span>⚠️</span><span>If this is a life-threatening emergency, <strong>call 911 immediately</strong>. This app does not dispatch emergency services.</span>
+                  <span>⚠️</span>
+                  <span>If this is a life-threatening emergency, <strong>call 911 immediately</strong>. This app does not dispatch emergency services.</span>
                 </div>
               )}
-              <button onClick={submitReport} disabled={!form.title.trim()}
-                style={{ padding: "12px", borderRadius: 8, border: "none", background: form.title.trim() ? "linear-gradient(135deg,#3BBFA3,#4A9EE0)" : T.card, color: form.title.trim() ? "#fff" : T.textDim, fontSize: 13, fontWeight: 600, cursor: form.title.trim() ? "pointer" : "not-allowed", fontFamily: "'DM Sans',sans-serif", transition: "all 0.15s" }}>
-                Pin to map →
+              {reportError && (
+                <div style={{ fontSize: 12, color: "#D45F5F", lineHeight: 1.4 }}>{reportError}</div>
+              )}
+              <button
+                onClick={submitReport}
+                disabled={!form.title.trim() || reportSubmitting}
+                style={{ padding: "12px", borderRadius: 8, border: "none", background: form.title.trim() && !reportSubmitting ? "linear-gradient(135deg, #3BBFA3, #4A9EE0)" : T.card, color: form.title.trim() && !reportSubmitting ? "#fff" : T.textDim, fontSize: 13, fontWeight: 600, cursor: form.title.trim() && !reportSubmitting ? "pointer" : "not-allowed", fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s" }}
+              >
+                {reportSubmitting ? "Saving…" : "Pin to map →"}
               </button>
             </div>
           </div>
