@@ -39,45 +39,11 @@ INSERT INTO severity_level (name) VALUES
   ('High'),
   ('Emergency');
 
-  (
-    'pothole',
-    'Pothole',
-    'Road surface damage, potholes, holes in pavement',
-    (SELECT id FROM severity_level WHERE name = 'High' LIMIT 1)
-  ),
-  (
-    'streetlight',
-    'Streetlight',
-    'Burned out, broken, or missing street lighting',
-    (SELECT id FROM severity_level WHERE name = 'Medium' LIMIT 1)
-  ),
-  (
-    'crosswalk',
-    'Crosswalk',
-    'Faded markings, missing signals, or crossing safety issues',
-    (SELECT id FROM severity_level WHERE name = 'High' LIMIT 1)
-  ),
-  (
-    'graffiti',
-    'Graffiti',
-    'Vandalism, spray paint, or tagging on public property',
-    (SELECT id FROM severity_level WHERE name = 'Low' LIMIT 1)
-  ),
-  (
-    'flooding',
-    'Flooding',
-    'Standing water, drainage backups, or storm-related pooling',
-    (SELECT id FROM severity_level WHERE name = 'High' LIMIT 1)
-  ),
-  (
-    'debris',
-    'Debris/Hazard',
-    'Obstructions on paths or roads: branches, trash, abandoned items',
-    (SELECT id FROM severity_level WHERE name = 'Medium' LIMIT 1)
-  ),
-  (
-    'other',
-    'Other',
-    'Reports that do not fit other categories',
-    (SELECT id FROM severity_level WHERE name = 'Low' LIMIT 1)
-  );
+INSERT INTO ISSUE_TYPE (name) VALUES
+  ('Pothole'),
+  ('Streetlight'),
+  ('Crosswalk'),
+  ('Graffiti'),
+  ('Flooding'),
+  ('Debris'),
+  ('Other');
