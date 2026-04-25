@@ -378,11 +378,14 @@ export default function VoiceMap() {
     const body = {
       lat: ai.location.lat,
       lng: ai.location.lng,
-      title: ai.report.impact_summary,
+      title: ai.report.title,
       category: ai.report.category,
       severity: ai.report.severity,
       impactSummary: ai.report.impact_summary,
       transcript: ai.transcript,
+      tags: ai.report.tags,
+      confidence: ai.report.confidence,
+      duration: ai.report.duration,
       sessionToken,
       userId: parseUuid(userRef.current?.id) ?? undefined,
     };
