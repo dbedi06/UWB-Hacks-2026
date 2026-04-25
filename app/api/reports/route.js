@@ -6,6 +6,7 @@ import {
   ISSUE_KEYS,
   uiSeverityToDb,
 } from "@/lib/reports";
+import { findDuplicateCluster } from "@/lib/cluster";
 
 const SEVERITY_UI = new Set(["low", "medium", "high", "emergency"]);
 
@@ -41,13 +42,25 @@ export async function GET(request) {
   const bounds = getBoundsFromUrl(request) ?? { minLat: -90, maxLat: 90, minLng: -180, maxLng: 180 };
 
   try {
+    // Group by effective cluster id (COALESCE(cluster_id, id)). Return one
+    // representative row per cluster — the most recent member — annotated
+    // with report_count for the count badge in the pin SVG.
     const rows = await sql`
-      SELECT * FROM reports
-      WHERE
-        status NOT IN ('resolved', 'dismissed')
-        AND lat BETWEEN ${bounds.minLat}::double precision AND ${bounds.maxLat}::double precision
-        AND lng BETWEEN ${bounds.minLng}::double precision AND ${bounds.maxLng}::double precision
-      ORDER BY reported_at DESC
+      WITH ranked AS (
+        SELECT
+          r.*,
+          COALESCE(r.cluster_id, r.id) AS effective_cluster,
+          COUNT(*) OVER (PARTITION BY COALESCE(r.cluster_id, r.id))      AS report_count,
+          ROW_NUMBER() OVER (
+            PARTITION BY COALESCE(r.cluster_id, r.id)
+            ORDER BY r.reported_at DESC
+          ) AS rn
+        FROM reports r
+        WHERE r.status NOT IN ('resolved', 'dismissed')
+          AND r.lat BETWEEN ${bounds.minLat}::double precision AND ${bounds.maxLat}::double precision
+          AND r.lng BETWEEN ${bounds.minLng}::double precision AND ${bounds.maxLng}::double precision
+      )
+      SELECT * FROM ranked WHERE rn = 1 ORDER BY reported_at DESC
     `;
     const reports = rows.map((row) => mapReportRowToClient(row));
     return Response.json({ reports });
@@ -131,12 +144,29 @@ export async function POST(request) {
 
   const dbSev = uiSeverityToDb(sev);
 
+  // Semantic dedup: if a nearby report is the same incident, attach this
+  // row to that cluster instead of starting a new one. Failures here are
+  // non-fatal — fall through with clusterId=null and let this row be its
+  // own cluster head.
+  let clusterId = null;
+  try {
+    clusterId = await findDuplicateCluster(sql, {
+      lat,
+      lng,
+      description: descriptionText,
+      category,
+      tags,
+    });
+  } catch (e) {
+    console.warn("[reports.POST] dedup check failed; inserting as new cluster:", e?.message ?? e);
+  }
+
   try {
     const [row] = await sql`
       WITH new_row AS (
         INSERT INTO reports (
           user_id, session_token, lat, lng, category, description,
-          tags, confidence, duration
+          tags, confidence, duration, cluster_id
         )
         VALUES (
           ${userUuid}::uuid,
@@ -147,7 +177,8 @@ export async function POST(request) {
           ${descriptionText}::text,
           ${tags}::text[],
           ${confidence}::real,
-          ${duration}::text
+          ${duration}::text,
+          ${clusterId}::uuid
         )
         RETURNING id
       )

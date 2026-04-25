@@ -92,6 +92,10 @@ CREATE TABLE reports (
   confidence     REAL    CHECK (confidence IS NULL OR confidence BETWEEN 0 AND 1),
   duration       TEXT,
 
+  -- Self-referential cluster head. NULL = this row is its own cluster head.
+  -- Effective cluster id is COALESCE(cluster_id, id).
+  cluster_id     UUID REFERENCES reports(id) ON DELETE SET NULL,
+
   CONSTRAINT reports_identity_required CHECK (
     user_id IS NOT NULL OR session_token IS NOT NULL
   )
@@ -165,6 +169,10 @@ CREATE INDEX idx_notifications_pending ON notifications (status)
 
 -- Tag filter — fast lookups like WHERE tags @> ARRAY['near_school']
 CREATE INDEX reports_tags_gin_idx ON reports USING GIN (tags);
+
+-- Fast lookups of all members of a cluster (partial: most reports
+-- have cluster_id IS NULL since they're solo / their own head).
+CREATE INDEX reports_cluster_id_idx ON reports (cluster_id) WHERE cluster_id IS NOT NULL;
 
 -- =============================================================
 -- FUNCTIONS — USERS
