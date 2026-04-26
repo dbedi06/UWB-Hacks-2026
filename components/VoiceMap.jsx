@@ -112,6 +112,7 @@ export default function VoiceMap() {
   const tileLayerRef = useRef(null);
   const markersRef = useRef({});
   const clusterRef = useRef(null);
+  const userMarkerRef = useRef(null);
   const userRef = useRef(null);
   const recognitionRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -246,6 +247,41 @@ export default function VoiceMap() {
     );
   };
   useEffect(() => { if (alertsOpen && !geoLocation) requestGeolocation(); }, [alertsOpen]);
+
+  // Ask once on first mount so the "you are here" pin shows up without
+  // making the user open the Alerts panel first.
+  useEffect(() => { requestGeolocation(); }, []);
+
+  // ─── User location marker ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (!mapReady || !leafletRef.current || !geoLocation) return;
+    const L = window.L;
+    const map = leafletRef.current;
+
+    const html = `<div style="
+      width:16px;height:16px;border-radius:50%;
+      background:#4A9EE0;border:3px solid #fff;
+      box-shadow:0 0 0 6px rgba(74,158,224,0.25),0 2px 6px rgba(0,0,0,0.5);
+    "></div>`;
+    const icon = L.divIcon({
+      html,
+      className: "vm-user-loc",
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
+
+    if (userMarkerRef.current) {
+      userMarkerRef.current.setLatLng([geoLocation.lat, geoLocation.lng]);
+      userMarkerRef.current.setIcon(icon);
+    } else {
+      userMarkerRef.current = L.marker([geoLocation.lat, geoLocation.lng], {
+        icon,
+        interactive: false,   // don't swallow map clicks
+        keyboard: false,
+        zIndexOffset: 1000,   // float above incident pins
+      }).addTo(map);
+    }
+  }, [geoLocation, mapReady]);
 
   // ─── Fetch live reports on mount ──────────────────────────────────────────
   const normalizeStatus = (s) => {
