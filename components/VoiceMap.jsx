@@ -527,6 +527,24 @@ export default function VoiceMap() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      if (res.status === 422) {
+        // Auto-moderation reject. Reopen the manual form pre-filled with the
+        // extracted fields so the user can edit and resubmit instead of
+        // redoing voice from scratch.
+        const err = await res.json().catch(() => ({}));
+        setReportError(`This report couldn't be posted: ${err.error}. Edit below and try again.`);
+        setForm({
+          title: "",
+          category: ai.report.category,
+          other_type: "",
+          severity: ai.report.severity,
+          impact_summary: ai.report.impact_summary,
+        });
+        setClickedLatLng({ lat: ai.location.lat, lng: ai.location.lng });
+        setPanelOpen(true);
+        setIsProcessing(false);
+        return;
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         alert(err.error || "Failed to save report.");
@@ -598,6 +616,14 @@ export default function VoiceMap() {
         }),
       });
       const data = await res.json();
+      if (res.status === 422) {
+        // Auto-moderation reject. Don't drop into the local-pin fallback —
+        // that's for offline/network failures and would put the rejected
+        // report on the map. Surface the reason and let the user edit.
+        setReportError(`This report couldn't be posted: ${data.error}. If this seems wrong, edit and resubmit.`);
+        setReportSubmitting(false);
+        return;
+      }
       if (!res.ok) throw new Error(data.error || "Failed to save report");
       const newReport = data.report;
       if (!newReport) throw new Error("Invalid response from server");

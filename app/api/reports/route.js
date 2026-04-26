@@ -7,6 +7,7 @@ import {
   uiSeverityToDb,
 } from "@/lib/reports";
 import { findDuplicateCluster } from "@/lib/cluster";
+import { moderateReport } from "@/lib/moderation";
 
 const SEVERITY_UI = new Set(["low", "medium", "high", "emergency"]);
 
@@ -144,21 +145,37 @@ export async function POST(request) {
 
   const dbSev = uiSeverityToDb(sev);
 
-  // Semantic dedup: if a nearby report is the same incident, attach this
-  // row to that cluster instead of starting a new one. Failures here are
-  // non-fatal — fall through with clusterId=null and let this row be its
-  // own cluster head.
-  let clusterId = null;
-  try {
-    clusterId = await findDuplicateCluster(sql, {
+  // Moderation + semantic dedup run in parallel — they don't depend on each
+  // other and dedup is already on the critical path, so the moderation gate
+  // adds near-zero latency. Both fail open: any throw or timeout in either
+  // call results in "allow" / "no cluster" rather than a 500.
+  const [moderation, clusterId] = await Promise.all([
+    moderateReport({
+      title: title.trim(),
+      description: descriptionText,
+      category,
+      tags,
+    }),
+    findDuplicateCluster(sql, {
       lat,
       lng,
       description: descriptionText,
       category,
       tags,
-    });
-  } catch (e) {
-    console.warn("[reports.POST] dedup check failed; inserting as new cluster:", e?.message ?? e);
+    }).catch((e) => {
+      console.warn("[reports.POST] dedup check failed; inserting as new cluster:", e?.message ?? e);
+      return null;
+    }),
+  ]);
+
+  if (!moderation.allow) {
+    console.warn(
+      `[moderation] reject session=${sessionToken ?? "none"} cat=${moderation.category} title="${title.trim().slice(0, 80)}"`
+    );
+    return Response.json(
+      { error: moderation.reason || "This report couldn't be posted. Try rephrasing." },
+      { status: 422 }
+    );
   }
 
   try {
