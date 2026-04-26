@@ -609,6 +609,7 @@ export default function VoiceMap() {
 
     setTranscript(ai.transcript);
 
+    // Emergency / crime warnings still come up before the user reviews.
     if (ai.report.severity === "emergency") {
       if (!window.confirm("⚠️ This sounds like an emergency. Please call 911 first.\n\nLog as a non-emergency report anyway?")) {
         setIsProcessing(false);
@@ -621,102 +622,26 @@ export default function VoiceMap() {
       }
     }
 
-    if (ai.report.confidence < 0.7) {
-      if (!window.confirm(`I heard: "${ai.transcript}"\n\nDoes that look right?`)) {
-        setIsProcessing(false);
-        return;
-      }
-    }
-
-    let uploadedImageUrl = null;
-    if (imageFile) {
-      try {
-        setImageUploading(true);
-        uploadedImageUrl = await uploadToCloudinary(imageFile);
-      } catch (e) {
-        alert("Image upload failed: " + e.message);
-        setIsProcessing(false);
-        setImageUploading(false);
-        return;
-      } finally {
-        setImageUploading(false);
-      }
-    }
-
-    const sessionToken = ensureSessionToken();
-    const body = {
-      lat: ai.location.lat,
-      lng: ai.location.lng,
-      title: ai.report.title,
-      category: ai.report.category,
-      severity: ai.report.severity,
-      impactSummary: ai.report.impact_summary,
-      transcript: ai.transcript,
-      tags: ai.report.tags,
-      confidence: ai.report.confidence,
-      duration: ai.report.duration,
-      image_url: uploadedImageUrl,
-      sessionToken,
-      // Use the Neon UUID (not Auth0 sub) — userRef.current is the Neon row
-      userId: parseUuid(userRef.current?.id) ?? undefined,
-    };
-
-    try {
-      const res = await fetch("/api/reports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (res.status === 422) {
-        const err = await res.json().catch(() => ({}));
-        setReportError(`This report couldn't be posted: ${err.error}. Edit below and try again.`);
-        setForm({
-          title: "",
-          category: ai.report.category,
-          other_type: "",
-          severity: ai.report.severity,
-          impact_summary: ai.report.impact_summary,
-        });
-        setClickedLatLng({ lat: ai.location.lat, lng: ai.location.lng });
-        setPanelOpen(true);
-        setIsProcessing(false);
-        return;
-      }
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        alert(err.error || "Failed to save report.");
-        setIsProcessing(false);
-        return;
-      }
-      const { report } = await res.json();
-      await refreshReports();
-      setSelected(report);
-      setPanelOpen(false);
-      setClickedLatLng(null);
-      resetImageState();
-    } catch {
-      const localReport = {
-        id: `r-${Date.now()}`,
-        lat: ai.location.lat,
-        lng: ai.location.lng,
-        category: ai.report.category,
-        severity: ai.report.severity,
-        status: "active",
-        title: ai.report.impact_summary,
-        location_description: `${ai.location.lat.toFixed(5)}, ${ai.location.lng.toFixed(5)}`,
-        impact_summary: ai.report.impact_summary,
-        image_url: uploadedImageUrl,
-        report_count: 1,
-        created_at: new Date().toISOString(),
-      };
-      setReports(prev => [...prev, localReport]);
-      setSelected(localReport);
-      setPanelOpen(false);
-      setClickedLatLng(null);
-      resetImageState();
-    } finally {
-      setIsProcessing(false);
-    }
+    // Always open the form pre-filled with the AI's extraction so the user
+    // can confirm what was heard, edit anything that's off, and optionally
+    // attach an image before submitting. Submission is then handled by the
+    // existing manual `submitReport` button (which posts to /api/reports
+    // and uploads to Cloudinary if an image is attached).
+    const lowConfidenceHint =
+      typeof ai.report.confidence === "number" && ai.report.confidence < 0.7
+        ? "Heads up: AI confidence is low — please double-check the fields."
+        : "";
+    setReportError(lowConfidenceHint);
+    setForm({
+      title: ai.report.title || "",
+      category: ai.report.category || "pothole",
+      other_type: "",
+      severity: ai.report.severity || "medium",
+      impact_summary: ai.report.impact_summary || "",
+    });
+    setClickedLatLng({ lat: ai.location.lat, lng: ai.location.lng });
+    setPanelOpen(true);
+    setIsProcessing(false);
   };
 
   // ─── Manual form submission ───────────────────────────────────────────────
