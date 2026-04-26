@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useUser } from "@auth0/nextjs-auth0/client";
 import { parseUuid } from "@/lib/reports";
 
 // ─── Session token ────────────────────────────────────────────────────────────
@@ -118,6 +119,24 @@ export default function VoiceMap() {
   const audioChunksRef = useRef([]);
   const isDraggingRef = useRef(false);
 
+  // ── Auth0 ─────────────────────────────────────────────────────────────────
+  // auth0User  = the Auth0 session user (has .email, .name, .sub, .picture)
+  // neonUser   = the row from our Neon DB (has .id UUID, .email, .display_name)
+  const { user: auth0User, isLoading: authLoading } = useUser();
+  const [neonUser, setNeonUser] = useState(null);
+
+  // Fetch the Neon user record once Auth0 confirms the session
+  useEffect(() => {
+    if (!auth0User) { setNeonUser(null); return; }
+    fetch("/api/me")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.user) setNeonUser(data.user); })
+      .catch(() => { });
+  }, [auth0User]);
+
+  // Keep userRef in sync so map click handler (closure) always sees latest value
+  useEffect(() => { userRef.current = neonUser; }, [neonUser]);
+
   // ── UI state ──────────────────────────────────────────────────────────────
   const [darkMode, setDarkMode] = useState(true);
   const [reports, setReports] = useState(SEED_REPORTS);
@@ -142,8 +161,7 @@ export default function VoiceMap() {
   const [geoError, setGeoError] = useState(false);
   const [alertPrefs, setAlertPrefs] = useState({ enabled: false, radius: 1, minSeverity: "medium" });
 
-  // SMS subscription state — persisted to localStorage so the user can
-  // see/unsubscribe their existing subscriptions on this device.
+  // SMS subscription state
   const [phoneInput, setPhoneInput] = useState("");
   const [subscriptions, setSubscriptions] = useState([]);
   const [subscribing, setSubscribing] = useState(false);
@@ -156,18 +174,11 @@ export default function VoiceMap() {
       if (raw) setSubscriptions(JSON.parse(raw));
     } catch { /* ignore corrupt localStorage */ }
   }, []);
+
   const persistSubscriptions = (list) => {
     setSubscriptions(list);
-    try { localStorage.setItem("voicemap_subscriptions", JSON.stringify(list)); } catch {}
+    try { localStorage.setItem("voicemap_subscriptions", JSON.stringify(list)); } catch { }
   };
-
-  // ── Auth state ────────────────────────────────────────────────────────────
-  const [user, setUser] = useState(null);
-  const [authOpen, setAuthOpen] = useState(false);
-  const [authMode, setAuthMode] = useState("login");
-  const [authForm, setAuthForm] = useState({ username: "", password: "", email: "", phone: "" });
-  const [authError, setAuthError] = useState("");
-  const [authLoading, setAuthLoading] = useState(false);
 
   // ── Report submission state ───────────────────────────────────────────────
   const [reportError, setReportError] = useState("");
@@ -175,8 +186,6 @@ export default function VoiceMap() {
 
   // ── Lightbox state ────────────────────────────────────────────────────────
   const [lightboxOpen, setLightboxOpen] = useState(false);
-
-  useEffect(() => { userRef.current = user; }, [user]);
 
   // ─── Theme ────────────────────────────────────────────────────────────────
   const T = darkMode ? {
@@ -208,34 +217,6 @@ export default function VoiceMap() {
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
   };
-
-  // ─── Auth handlers ────────────────────────────────────────────────────────
-  const handleLogin = async () => {
-    if (!authForm.username || !authForm.password) { setAuthError("Please enter your username and password."); return; }
-    setAuthLoading(true); setAuthError("");
-    try {
-      await new Promise(r => setTimeout(r, 600));
-      setUser({ id: "u1", username: authForm.username, email: authForm.email || "", phone: authForm.phone || "" });
-      setAuthOpen(false);
-      setAuthForm({ username: "", password: "", email: "", phone: "" });
-    } catch (e) { setAuthError(e.message); }
-    finally { setAuthLoading(false); }
-  };
-
-  const handleSignup = async () => {
-    if (!authForm.username || !authForm.password) { setAuthError("Username and password are required."); return; }
-    if (!authForm.email && !authForm.phone) { setAuthError("Please provide at least an email or phone number."); return; }
-    setAuthLoading(true); setAuthError("");
-    try {
-      await new Promise(r => setTimeout(r, 600));
-      setUser({ id: "u1", username: authForm.username, email: authForm.email, phone: authForm.phone });
-      setAuthOpen(false);
-      setAuthForm({ username: "", password: "", email: "", phone: "" });
-    } catch (e) { setAuthError(e.message); }
-    finally { setAuthLoading(false); }
-  };
-
-  const handleLogout = () => setUser(null);
 
   // ─── Geolocation ──────────────────────────────────────────────────────────
   const requestGeolocation = () => {
@@ -278,9 +259,6 @@ export default function VoiceMap() {
     created_at: r.created_at || r.reported_at || new Date().toISOString(),
   });
 
-  // Pulls aggregated cluster heads (one row per cluster, with report_count)
-  // from /api/reports. Called on mount and after any successful submission
-  // so the map reflects server-side dedup without needing a manual refresh.
   const refreshReports = useCallback(async () => {
     try {
       const res = await fetch("/api/reports");
@@ -301,11 +279,6 @@ export default function VoiceMap() {
   useEffect(() => {
     if (typeof window === "undefined" || leafletRef.current) return;
 
-    // Idempotent loaders — StrictMode runs effects twice in dev. Without these
-    // guards we'd inject two copies of Leaflet (the second redefines window.L)
-    // and two copies of markercluster, leaving the cluster instance with mixed
-    // prototype state. That manifests as `_zoom of undefined` deep inside
-    // MarkerClusterGroup.addLayer's parent-walk loop.
     const ensureCss = (href) => {
       if (document.querySelector(`link[href="${href}"]`)) return;
       const link = document.createElement("link");
@@ -351,8 +324,6 @@ export default function VoiceMap() {
       center: BOTHELL_CENTER,
       zoom: 14,
       zoomControl: false,
-      // Floor: country-wide view. noWrap on the tile layer keeps the world
-      // from repeating horizontally even at this scale.
       minZoom: 4,
       maxZoom: 19,
       worldCopyJump: false,
@@ -363,7 +334,7 @@ export default function VoiceMap() {
       subdomains: "abcd",
       minZoom: 4,
       maxZoom: 19,
-      noWrap: true,           // don't repeat tiles horizontally past lng ±180
+      noWrap: true,
     }).addTo(map);
     tileLayerRef.current = tl;
 
@@ -375,7 +346,11 @@ export default function VoiceMap() {
     map.on("click", e => {
       if (isDraggingRef.current) return;
       setSelected(null);
-      if (!userRef.current) { setAuthOpen(true); setAuthMode("login"); return; }
+      // If not logged in, redirect to Auth0 login
+      if (!userRef.current) {
+        window.location.href = "/api/auth/login";
+        return;
+      }
       setClickedLatLng({ lat: e.latlng.lat, lng: e.latlng.lng });
       setPanelOpen(true);
       setTranscript("");
@@ -444,9 +419,6 @@ export default function VoiceMap() {
   }, [reports, filter, mapReady]);
 
   // ─── Voice recording ──────────────────────────────────────────────────────
-  // Idempotency guard — pointer events shouldn't double-fire, but if they do
-  // (or if the user mashes the button), a second MediaRecorder would orphan
-  // the first and keep recording forever.
   const startRecording = async () => {
     if (recording || isProcessing) return;
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") return;
@@ -485,11 +457,11 @@ export default function VoiceMap() {
 
   const stopRecording = () => {
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch {}
+      try { recognitionRef.current.stop(); } catch { }
       recognitionRef.current = null;
     }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      try { mediaRecorderRef.current.stop(); } catch {}
+      try { mediaRecorderRef.current.stop(); } catch { }
     }
     mediaRecorderRef.current = null;
     setRecording(false);
@@ -583,7 +555,6 @@ export default function VoiceMap() {
       }
     }
 
-    // Upload image to Cloudinary if one was attached
     let uploadedImageUrl = null;
     if (imageFile) {
       try {
@@ -613,6 +584,7 @@ export default function VoiceMap() {
       duration: ai.report.duration,
       image_url: uploadedImageUrl,
       sessionToken,
+      // Use the Neon UUID (not Auth0 sub) — userRef.current is the Neon row
       userId: parseUuid(userRef.current?.id) ?? undefined,
     };
 
@@ -623,9 +595,6 @@ export default function VoiceMap() {
         body: JSON.stringify(body),
       });
       if (res.status === 422) {
-        // Auto-moderation reject. Reopen the manual form pre-filled with the
-        // extracted fields so the user can edit and resubmit instead of
-        // redoing voice from scratch.
         const err = await res.json().catch(() => ({}));
         setReportError(`This report couldn't be posted: ${err.error}. Edit below and try again.`);
         setForm({
@@ -647,8 +616,6 @@ export default function VoiceMap() {
         return;
       }
       const { report } = await res.json();
-      // Refetch the aggregated cluster list so this submission collapses
-      // into an existing pin if the server attached it to a cluster.
       await refreshReports();
       setSelected(report);
       setPanelOpen(false);
@@ -696,7 +663,6 @@ export default function VoiceMap() {
     setReportSubmitting(true);
     setReportError("");
 
-    // Upload image to Cloudinary first if one was attached
     let uploadedImageUrl = null;
     if (imageFile) {
       try {
@@ -726,14 +692,12 @@ export default function VoiceMap() {
           transcript: transcript || undefined,
           image_url: uploadedImageUrl,
           sessionToken,
-          userId: parseUuid(user?.id) ?? undefined,
+          // Use the Neon UUID (not Auth0 sub)
+          userId: parseUuid(neonUser?.id) ?? undefined,
         }),
       });
       const data = await res.json();
       if (res.status === 422) {
-        // Auto-moderation reject. Don't drop into the local-pin fallback —
-        // that's for offline/network failures and would put the rejected
-        // report on the map. Surface the reason and let the user edit.
         setReportError(`This report couldn't be posted: ${data.error}. If this seems wrong, edit and resubmit.`);
         setReportSubmitting(false);
         return;
@@ -741,8 +705,6 @@ export default function VoiceMap() {
       if (!res.ok) throw new Error(data.error || "Failed to save report");
       const newReport = data.report;
       if (!newReport) throw new Error("Invalid response from server");
-      // Refetch the aggregated cluster list so this submission collapses
-      // into an existing pin if the server attached it to a cluster.
       await refreshReports();
       setPanelOpen(false);
       setSelected(newReport);
@@ -793,6 +755,9 @@ export default function VoiceMap() {
     color: T.textFaint, fontSize: 16, cursor: "pointer", padding: "4px 10px",
   };
 
+  // Display name: prefer Neon display_name, fall back to Auth0 name, then email
+  const displayName = neonUser?.display_name || auth0User?.name || auth0User?.email || "";
+
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "'DM Sans', sans-serif", background: T.pageBg, color: T.text, position: "relative", overflow: "hidden" }}>
@@ -832,7 +797,7 @@ export default function VoiceMap() {
           ))}
         </div>
 
-        {/* Severity legend — pin color reflects severity */}
+        {/* Severity legend */}
         <div style={{ padding: "10px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", gap: 12 }}>
           {Object.entries(SEVERITIES).map(([k, s]) => (
             <div key={k} style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -890,15 +855,19 @@ export default function VoiceMap() {
             })}
         </div>
 
-        {/* Auth footer */}
+        {/* Auth footer — now uses Auth0 */}
         <div style={{ padding: "12px 16px", borderTop: `1px solid ${T.border}` }}>
-          {user ? (
+          {authLoading ? (
+            <div style={{ fontSize: 11, color: T.textDim, textAlign: "center", padding: "8px 0" }}>Loading…</div>
+          ) : auth0User ? (
             <div>
               <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 8, lineHeight: 1.5 }}>
-                Signed in as <span style={{ color: T.text, fontWeight: 500 }}>{user.username}</span>. Click the map to report.
+                Signed in as <span style={{ color: T.text, fontWeight: 500 }}>{displayName}</span>. Click the map to report.
               </div>
-              <button onClick={handleLogout}
-                style={{ width: "100%", padding: "8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "transparent", color: T.textMuted, fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>
+              <button
+                onClick={() => { window.location.href = "/api/auth/logout"; }}
+                style={{ width: "100%", padding: "8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "transparent", color: T.textMuted, fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}
+              >
                 Sign out
               </button>
             </div>
@@ -906,12 +875,16 @@ export default function VoiceMap() {
             <div>
               <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 10px", lineHeight: 1.5 }}>Sign in to report issues or subscribe to alerts.</p>
               <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={() => { setAuthMode("login"); setAuthOpen(true); setAuthError(""); }}
-                  style={{ flex: 1, padding: "8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: T.card, color: T.text, fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}>
+                <button
+                  onClick={() => { window.location.href = "/api/auth/login"; }}
+                  style={{ flex: 1, padding: "8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: T.card, color: T.text, fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}
+                >
                   Sign in
                 </button>
-                <button onClick={() => { setAuthMode("signup"); setAuthOpen(true); setAuthError(""); }}
-                  style={{ flex: 1, padding: "8px", borderRadius: 6, border: "none", background: "linear-gradient(135deg, #3BBFA3, #4A9EE0)", color: "#fff", fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>
+                <button
+                  onClick={() => { window.location.href = "/api/auth/login?screen_hint=signup"; }}
+                  style={{ flex: 1, padding: "8px", borderRadius: 6, border: "none", background: "linear-gradient(135deg, #3BBFA3, #4A9EE0)", color: "#fff", fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}
+                >
                   Sign up
                 </button>
               </div>
@@ -925,7 +898,10 @@ export default function VoiceMap() {
 
       {/* ── Alerts button ─────────────────────────────────────────── */}
       <button
-        onClick={() => { if (!user) { setAuthMode("login"); setAuthOpen(true); setAuthError(""); } else setAlertsOpen(true); }}
+        onClick={() => {
+          if (!auth0User) { window.location.href = "/api/auth/login"; return; }
+          setAlertsOpen(true);
+        }}
         style={{ position: "absolute", top: 20, right: 20, zIndex: 1000, background: T.sidebar, border: `1px solid ${T.border2}`, borderRadius: 8, color: T.text, fontSize: 13, fontWeight: 600, padding: "10px 18px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.3)", fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s" }}
         onMouseEnter={e => e.currentTarget.style.borderColor = "#3BBFA3"}
         onMouseLeave={e => e.currentTarget.style.borderColor = T.border2}
@@ -959,7 +935,6 @@ export default function VoiceMap() {
             <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", color: T.textMuted, fontSize: 18, cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
           </div>
 
-          {/* Photo — clickable to open lightbox */}
           {selected.image_url && (
             <div style={{ marginBottom: 12, borderRadius: 8, overflow: "hidden", cursor: "zoom-in" }} onClick={() => setLightboxOpen(true)}>
               <img
@@ -1021,45 +996,6 @@ export default function VoiceMap() {
           >
             ✕ Close
           </button>
-        </div>
-      )}
-
-      {/* ── Auth modal ────────────────────────────────────────────── */}
-      {authOpen && (
-        <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 4000, padding: 24 }}>
-          <div style={{ ...modalBox, maxWidth: 400 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-              <div>
-                <div style={{ fontSize: 16, fontWeight: 600, color: T.text }}>{authMode === "login" ? "Sign in to VoiceMap" : "Create an account"}</div>
-                <div style={{ fontSize: 11, color: T.textMuted, marginTop: 3 }}>{authMode === "login" ? "Report issues and subscribe to alerts" : "Join your community on VoiceMap"}</div>
-              </div>
-              <button onClick={() => setAuthOpen(false)} style={closeBtn}>×</button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <input value={authForm.username} onChange={e => setAuthForm(f => ({ ...f, username: e.target.value }))} placeholder="Username" autoComplete="username" style={inputStyle} />
-              <input value={authForm.password} onChange={e => setAuthForm(f => ({ ...f, password: e.target.value }))} placeholder="Password" type="password" autoComplete={authMode === "signup" ? "new-password" : "current-password"} style={inputStyle} />
-              {authMode === "signup" && (
-                <>
-                  <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>Provide at least one contact method for alerts:</div>
-                  <input value={authForm.email} onChange={e => setAuthForm(f => ({ ...f, email: e.target.value }))} placeholder="Email address (optional)" type="email" autoComplete="email" style={inputStyle} />
-                  <input value={authForm.phone} onChange={e => setAuthForm(f => ({ ...f, phone: e.target.value }))} placeholder="Phone number (optional)" type="tel" autoComplete="tel" style={inputStyle} />
-                </>
-              )}
-              {authError && (
-                <div style={{ fontSize: 12, color: "#D45F5F", background: "#D45F5F11", border: "1px solid #D45F5F33", borderRadius: 6, padding: "8px 10px" }}>{authError}</div>
-              )}
-              <button onClick={authMode === "login" ? handleLogin : handleSignup} disabled={authLoading}
-                style={{ marginTop: 4, padding: "12px", borderRadius: 8, border: "none", background: authLoading ? T.card : "linear-gradient(135deg, #3BBFA3, #4A9EE0)", color: authLoading ? T.textDim : "#fff", fontSize: 13, fontWeight: 600, cursor: authLoading ? "not-allowed" : "pointer", fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s" }}>
-                {authLoading ? "Please wait…" : authMode === "login" ? "Sign in →" : "Create account →"}
-              </button>
-              <div style={{ textAlign: "center", fontSize: 12, color: T.textMuted, marginTop: 4 }}>
-                {authMode === "login" ? "Don't have an account? " : "Already have an account? "}
-                <span onClick={() => { setAuthMode(authMode === "login" ? "signup" : "login"); setAuthError(""); }} style={{ color: "#3BBFA3", cursor: "pointer", fontWeight: 500 }}>
-                  {authMode === "login" ? "Sign up" : "Sign in"}
-                </span>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 
@@ -1196,9 +1132,6 @@ export default function VoiceMap() {
                 disabled={isProcessing}
                 onPointerDown={(e) => {
                   if (isProcessing) return;
-                  // Capture so pointerup fires here even if the pointer drifts
-                  // off the button — fixes the "still recording after release"
-                  // bug where mouseup landed outside and never reached us.
                   e.currentTarget.setPointerCapture?.(e.pointerId);
                   startRecording();
                 }}
@@ -1215,8 +1148,6 @@ export default function VoiceMap() {
                   display: "flex", alignItems: "center", justifyContent: "center",
                   gap: 10, transition: "all 0.15s",
                   fontFamily: "'DM Sans', sans-serif",
-                  // Prevent the browser from stealing touch (scroll, long-press
-                  // context menu) which would synthesize unmatched mouse events.
                   touchAction: "none",
                   userSelect: "none",
                 }}
@@ -1262,7 +1193,7 @@ export default function VoiceMap() {
                 style={{ ...inputStyle, fontSize: 12, resize: "vertical", lineHeight: 1.5 }}
               />
 
-              {/* ── Image attachment ── */}
+              {/* Image attachment */}
               <div>
                 <input
                   id="vm-image-input"
