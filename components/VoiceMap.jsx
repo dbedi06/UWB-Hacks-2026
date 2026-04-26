@@ -258,29 +258,44 @@ export default function VoiceMap() {
   useEffect(() => {
     if (typeof window === "undefined" || leafletRef.current) return;
 
-    // Leaflet base CSS + JS, then markercluster CSS + JS chained on top.
-    const cssHrefs = [
-      "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
-      "https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css",
-      "https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css",
-    ];
-    cssHrefs.forEach((href) => {
+    // Idempotent loaders — StrictMode runs effects twice in dev. Without these
+    // guards we'd inject two copies of Leaflet (the second redefines window.L)
+    // and two copies of markercluster, leaving the cluster instance with mixed
+    // prototype state. That manifests as `_zoom of undefined` deep inside
+    // MarkerClusterGroup.addLayer's parent-walk loop.
+    const ensureCss = (href) => {
+      if (document.querySelector(`link[href="${href}"]`)) return;
       const link = document.createElement("link");
       link.rel = "stylesheet";
       link.href = href;
       document.head.appendChild(link);
-    });
-
-    const leafletScript = document.createElement("script");
-    leafletScript.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-    leafletScript.onload = () => {
-      // markercluster depends on Leaflet — load it after Leaflet finishes
-      const mcScript = document.createElement("script");
-      mcScript.src = "https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js";
-      mcScript.onload = () => initMap();
-      document.head.appendChild(mcScript);
     };
-    document.head.appendChild(leafletScript);
+    const ensureScript = (src) =>
+      new Promise((resolve) => {
+        const existing = document.querySelector(`script[src="${src}"]`);
+        if (existing) {
+          if (existing.dataset.loaded === "1") return resolve();
+          existing.addEventListener("load", () => resolve(), { once: true });
+          return;
+        }
+        const s = document.createElement("script");
+        s.src = src;
+        s.addEventListener("load", () => {
+          s.dataset.loaded = "1";
+          resolve();
+        }, { once: true });
+        document.head.appendChild(s);
+      });
+
+    ensureCss("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css");
+    ensureCss("https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css");
+    ensureCss("https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css");
+
+    (async () => {
+      await ensureScript("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js");
+      await ensureScript("https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js");
+      initMap();
+    })();
   }, []);
 
   const initMap = useCallback(() => {
