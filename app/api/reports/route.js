@@ -47,6 +47,12 @@ export async function GET(request) {
         // Group by effective cluster id (COALESCE(cluster_id, id)). Return one
         // representative row per cluster — the most recent member — annotated
         // with report_count for the count badge in the pin SVG.
+        //
+        // image_url is special: the representative (most-recent) member may
+        // not have a photo even if an earlier cluster member did. Use
+        // FIRST_VALUE with `image_url IS NULL` first in the ORDER BY to pick
+        // any non-null image_url across the cluster, falling back to
+        // most-recent if none.
         const rows = await sql`
       WITH ranked AS (
         SELECT
@@ -56,7 +62,11 @@ export async function GET(request) {
           ROW_NUMBER() OVER (
             PARTITION BY COALESCE(r.cluster_id, r.id)
             ORDER BY r.reported_at DESC
-          ) AS rn
+          ) AS rn,
+          FIRST_VALUE(r.image_url) OVER (
+            PARTITION BY COALESCE(r.cluster_id, r.id)
+            ORDER BY (r.image_url IS NULL), r.reported_at DESC
+          ) AS cluster_image_url
         FROM reports r
         WHERE r.status NOT IN ('resolved', 'dismissed')
           AND r.lat BETWEEN ${bounds.minLat}::double precision AND ${bounds.maxLat}::double precision
