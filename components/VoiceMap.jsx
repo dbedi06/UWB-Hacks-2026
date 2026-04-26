@@ -965,8 +965,12 @@ export default function VoiceMap() {
         {/* Stats */}
         <div style={{ padding: "14px 16px", borderBottom: `1px solid ${T.border}`, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {[
-            { label: "Total", value: reports.reduce((s, r) => s + (r.report_count || 1), 0) },
-            { label: "Active", value: reports.filter(r => r.status === "active").length },
+            // "Reports" sums every individual submission (cluster members count
+            // separately). "Issues" counts distinct incidents on the map (cluster
+            // heads). When the two diverge, it means residents have re-reported
+            // the same problem.
+            { label: "Reports", value: reports.reduce((s, r) => s + (r.report_count || 1), 0) },
+            { label: "Issues", value: reports.filter(r => r.status === "active").length },
           ].map(s => (
             <div key={s.label} style={{ background: T.card, borderRadius: 8, padding: "8px 10px" }}>
               <div style={{ fontSize: 20, fontWeight: 600, fontFamily: "'DM Mono', monospace", color: T.text }}>{s.value}</div>
