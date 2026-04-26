@@ -332,10 +332,9 @@ export default function VoiceMap() {
       center: BOTHELL_CENTER,
       zoom: 14,
       zoomControl: false,
-      // Floor: zoomed out to roughly all of WA + neighboring states.
-      // Anything below 5 starts showing tile wrap; this is a comfortable
-      // "regional context" floor.
-      minZoom: 7,
+      // Floor: country-wide view. noWrap on the tile layer keeps the world
+      // from repeating horizontally even at this scale.
+      minZoom: 4,
       maxZoom: 19,
       worldCopyJump: false,
     });
@@ -343,7 +342,7 @@ export default function VoiceMap() {
     const tl = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
       attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
       subdomains: "abcd",
-      minZoom: 7,
+      minZoom: 4,
       maxZoom: 19,
       noWrap: true,           // don't repeat tiles horizontally past lng ±180
     }).addTo(map);
