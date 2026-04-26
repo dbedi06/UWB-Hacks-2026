@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import { runDigest } from "@/lib/digest";
+import { getAdminSession } from "@/lib/admin";
 
 const DB_UNCONFIGURED = {
   error: "Database not configured.",
@@ -11,18 +12,25 @@ const MAX_HOURS_BACK = 24 * 14; // 2 weeks max — guards against runaway querie
 /**
  * POST /api/digest — compile the City Hall digest and send.
  * Body (all optional):
- *   { hoursBack?: number, recipient?: string }
+ *   { hoursBack?: number }
  * Returns:
  *   { ok, recipient, totalReports, totalClusters, summary, messageId } on success
  *   { ok: false, error } on failure
  *
- * No auth in V1. The endpoint is safe to expose for the demo because:
- * - It only sends to the configured DIGEST_RECIPIENT_EMAIL (if recipient
- *   override is rejected per the validation below).
- * - SES still bills per send, so abuse cost is real but capped by the
- *   verified-recipient sandbox.
+ * Auth: requires an Auth0 session whose email is in ADMIN_EMAILS.
+ * Recipient is server-controlled via DIGEST_RECIPIENT_EMAIL — the endpoint
+ * is not a relay to arbitrary inboxes.
  */
 export async function POST(request) {
+  // Admin gate first — cheap, no DB hit if unauthorized.
+  const { session, isAdmin } = await getAdminSession();
+  if (!session) {
+    return Response.json({ ok: false, error: "Not authenticated" }, { status: 401 });
+  }
+  if (!isAdmin) {
+    return Response.json({ ok: false, error: "Admin access required." }, { status: 403 });
+  }
+
   const sql = getSql();
   if (!sql) return Response.json(DB_UNCONFIGURED, { status: 503 });
 

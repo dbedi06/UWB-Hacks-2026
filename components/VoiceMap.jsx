@@ -1217,39 +1217,45 @@ export default function VoiceMap() {
               <button onClick={() => setAlertsOpen(false)} style={closeBtn}>×</button>
             </div>
 
-            {/* City Hall digest — admin-style action; lives at the top of the
-                Alerts panel since it's adjacent in concept (notify city instead
-                of individual subscribers). */}
-            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 18 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: T.text, marginBottom: 2 }}>📨 City Hall digest</div>
-                  <div style={{ fontSize: 10, color: T.textMuted, lineHeight: 1.4 }}>AI-summarized email of the last 24h of reports.</div>
+            {/* City Hall digest — admin-only action. Hidden entirely for
+                non-admins so the panel doesn't even hint at the feature. The
+                server enforces the same gate via /api/me + /api/digest, so
+                this is just a UX nicety, not a security boundary. */}
+            {neonUser?.is_admin && (
+              <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 18 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: T.text, marginBottom: 2 }}>
+                      📨 City Hall digest
+                      <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: "#4A9EE0", border: "1px solid #4A9EE0", borderRadius: 3, padding: "1px 5px", textTransform: "uppercase", letterSpacing: "0.04em" }}>Admin</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: T.textMuted, lineHeight: 1.4 }}>AI-summarized email of the last 24h of reports.</div>
+                  </div>
+                  <button
+                    onClick={sendCityHallDigest}
+                    disabled={digestSending}
+                    style={{
+                      flexShrink: 0,
+                      padding: "8px 14px",
+                      borderRadius: 6,
+                      border: "1px solid #4A9EE0",
+                      background: "#4A9EE022",
+                      color: "#4A9EE0",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: digestSending ? "wait" : "pointer",
+                      opacity: digestSending ? 0.6 : 1,
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}
+                  >
+                    {digestSending ? "Sending…" : "Send now"}
+                  </button>
                 </div>
-                <button
-                  onClick={sendCityHallDigest}
-                  disabled={digestSending}
-                  style={{
-                    flexShrink: 0,
-                    padding: "8px 14px",
-                    borderRadius: 6,
-                    border: "1px solid #4A9EE0",
-                    background: "#4A9EE022",
-                    color: "#4A9EE0",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    cursor: digestSending ? "wait" : "pointer",
-                    opacity: digestSending ? 0.6 : 1,
-                    fontFamily: "'DM Sans', sans-serif",
-                  }}
-                >
-                  {digestSending ? "Sending…" : "Send now"}
-                </button>
+                {digestMsg && (
+                  <div style={{ fontSize: 11, color: digestMsg.startsWith("✓") ? "#3BBFA3" : "#D45F5F", marginTop: 8, lineHeight: 1.5 }}>{digestMsg}</div>
+                )}
               </div>
-              {digestMsg && (
-                <div style={{ fontSize: 11, color: digestMsg.startsWith("✓") ? "#3BBFA3" : "#D45F5F", marginTop: 8, lineHeight: 1.5 }}>{digestMsg}</div>
-              )}
-            </div>
+            )}
 
             {geoError || !geoLocation ? (
               <div style={{ textAlign: "center", padding: "24px 0" }}>
