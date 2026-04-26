@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useUser } from "@auth0/nextjs-auth0/client";
+import { useUser } from "@auth0/nextjs-auth0";
 import { parseUuid } from "@/lib/reports";
 
 // ─── Session token ────────────────────────────────────────────────────────────
@@ -416,7 +416,7 @@ export default function VoiceMap() {
       setSelected(null);
       // If not logged in, redirect to Auth0 login
       if (!userRef.current) {
-        window.location.href = "/api/auth/login";
+        window.location.href = "/auth/login";
         return;
       }
       setClickedLatLng({ lat: e.latlng.lat, lng: e.latlng.lng });
@@ -933,7 +933,7 @@ export default function VoiceMap() {
                 Signed in as <span style={{ color: T.text, fontWeight: 500 }}>{displayName}</span>. Click the map to report.
               </div>
               <button
-                onClick={() => { window.location.href = "/api/auth/logout"; }}
+                onClick={() => { window.location.href = "/auth/logout"; }}
                 style={{ width: "100%", padding: "8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: "transparent", color: T.textMuted, fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}
               >
                 Sign out
@@ -944,13 +944,13 @@ export default function VoiceMap() {
               <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 10px", lineHeight: 1.5 }}>Sign in to report issues or subscribe to alerts.</p>
               <div style={{ display: "flex", gap: 6 }}>
                 <button
-                  onClick={() => { window.location.href = "/api/auth/login"; }}
+                  onClick={() => { window.location.href = "/auth/login"; }}
                   style={{ flex: 1, padding: "8px", borderRadius: 6, border: `1px solid ${T.border2}`, background: T.card, color: T.text, fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}
                 >
                   Sign in
                 </button>
                 <button
-                  onClick={() => { window.location.href = "/api/auth/login?screen_hint=signup"; }}
+                  onClick={() => { window.location.href = "/auth/login?screen_hint=signup"; }}
                   style={{ flex: 1, padding: "8px", borderRadius: 6, border: "none", background: "linear-gradient(135deg, #3BBFA3, #4A9EE0)", color: "#fff", fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}
                 >
                   Sign up
@@ -967,7 +967,7 @@ export default function VoiceMap() {
       {/* ── Alerts button ─────────────────────────────────────────── */}
       <button
         onClick={() => {
-          if (!auth0User) { window.location.href = "/api/auth/login"; return; }
+          if (!auth0User) { window.location.href = "/auth/login"; return; }
           setAlertsOpen(true);
         }}
         style={{ position: "absolute", top: 20, right: 20, zIndex: 1000, background: T.sidebar, border: `1px solid ${T.border2}`, borderRadius: 8, color: T.text, fontSize: 13, fontWeight: 600, padding: "10px 18px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.3)", fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s" }}
