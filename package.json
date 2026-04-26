@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@auth0/nextjs-auth0": "^4.19.0",
+    "@aws-sdk/client-ses": "^3.1037.0",
     "@neondatabase/serverless": "^0.10.0",
     "@stackframe/stack": "^2.8.85",
     "next": "16.2.4",

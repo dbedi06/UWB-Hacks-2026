@@ -9,10 +9,29 @@ const DB_UNCONFIGURED = {
 const RADIUS_MIN = 100;       // 100m floor — anything tighter is jitter
 const RADIUS_MAX = 100_000;   // 100km ceiling — at this scale, just opt into "all"
 
+const CONTACT_PREFS = new Set(["email", "sms", "both"]);
+
+/** RFC 5322-lite — good enough for hackathon validation. */
+function normalizeEmail(raw) {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim().toLowerCase();
+  if (s.length === 0 || s.length > 255) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) return null;
+  return s;
+}
+
 /**
  * POST: create a subscription.
- * Body: { phone, lat, lng, radius_meters, min_severity?, category_filter? }
- * Returns: { id }
+ * Body: {
+ *   contact_preference?: 'email' | 'sms' | 'both',   // default 'sms'
+ *   phone?: string,        // required when preference is 'sms' or 'both'
+ *   email?: string,        // required when preference is 'email' or 'both'
+ *   lat: number, lng: number,
+ *   radius_meters: number,
+ *   min_severity?: string,
+ *   category_filter?: string[],
+ * }
+ * Returns: { id, dedup?: boolean }
  */
 export async function POST(request) {
   const sql = getSql();
@@ -25,10 +44,36 @@ export async function POST(request) {
     return Response.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const phone = normalizeE164(body.phone);
-  if (!phone) {
+  const prefRaw = typeof body.contact_preference === "string"
+    ? body.contact_preference.trim().toLowerCase()
+    : "sms";
+  if (!CONTACT_PREFS.has(prefRaw)) {
     return Response.json(
-      { error: "A valid phone number is required (E.164 format)." },
+      { error: "contact_preference must be email, sms, or both." },
+      { status: 400 }
+    );
+  }
+  /** @type {'email'|'sms'|'both'} */
+  const contactPreference = prefRaw;
+
+  const phone =
+    typeof body.phone === "string" && body.phone.trim()
+      ? normalizeE164(body.phone)
+      : null;
+  const email =
+    typeof body.email === "string" && body.email.trim()
+      ? normalizeEmail(body.email)
+      : null;
+
+  if ((contactPreference === "sms" || contactPreference === "both") && !phone) {
+    return Response.json(
+      { error: "A valid phone number (E.164 format) is required for SMS alerts." },
+      { status: 400 }
+    );
+  }
+  if ((contactPreference === "email" || contactPreference === "both") && !email) {
+    return Response.json(
+      { error: "A valid email address is required for email alerts." },
       { status: 400 }
     );
   }
@@ -65,16 +110,24 @@ export async function POST(request) {
     categoryFilter = filtered;
   }
 
+  // Per-channel column writes — only set the channel we'll actually use.
+  const contactOverride = contactPreference === "email" ? null : phone;
+  const contactEmail = contactPreference === "sms" ? null : email;
+
   try {
-    // Don't create duplicate rows when the same (phone, lat, lng, radius)
-    // tuple already exists — return the existing id instead. Prevents the
-    // SMS dispatcher from sending two messages to the same number when the
-    // user clicks Subscribe twice.
+    // Dedup: if the same (recipient + watch area + radius) already exists,
+    // return that row's id instead of inserting a new one. Prevents repeat
+    // notifications when the user re-submits the same form. Keying logic:
+    //   - sms: phone + lat + lng + radius
+    //   - email: email + lat + lng + radius
+    //   - both: all of the above
     const radiusInt = Math.round(radius);
     const existing = await sql`
       SELECT id::text AS id
       FROM subscriptions
-      WHERE contact_override = ${phone}::varchar(255)
+      WHERE contact_preference = ${contactPreference}::contact_preference
+        AND (${contactOverride}::varchar(255) IS NULL OR contact_override = ${contactOverride}::varchar(255))
+        AND (${contactEmail}::varchar(255) IS NULL OR contact_email = ${contactEmail}::varchar(255))
         AND ABS(center_lat - ${lat}::double precision) < 0.00001
         AND ABS(center_lng - ${lng}::double precision) < 0.00001
         AND radius_meters = ${radiusInt}
@@ -86,13 +139,14 @@ export async function POST(request) {
 
     const [row] = await sql`
       INSERT INTO subscriptions (
-        contact_override, contact_preference,
+        contact_override, contact_email, contact_preference,
         center_lat, center_lng, radius_meters,
         category_filter, min_severity
       )
       VALUES (
-        ${phone}::varchar(255),
-        'sms'::contact_preference,
+        ${contactOverride}::varchar(255),
+        ${contactEmail}::varchar(255),
+        ${contactPreference}::contact_preference,
         ${lat}::double precision,
         ${lng}::double precision,
         ${radiusInt}::int,
