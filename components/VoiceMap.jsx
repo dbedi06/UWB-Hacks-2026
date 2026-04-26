@@ -142,6 +142,25 @@ export default function VoiceMap() {
   const [geoError, setGeoError] = useState(false);
   const [alertPrefs, setAlertPrefs] = useState({ enabled: false, radius: 1, minSeverity: "medium" });
 
+  // SMS subscription state — persisted to localStorage so the user can
+  // see/unsubscribe their existing subscriptions on this device.
+  const [phoneInput, setPhoneInput] = useState("");
+  const [subscriptions, setSubscriptions] = useState([]);
+  const [subscribing, setSubscribing] = useState(false);
+  const [subscribeMsg, setSubscribeMsg] = useState("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem("voicemap_subscriptions");
+      if (raw) setSubscriptions(JSON.parse(raw));
+    } catch { /* ignore corrupt localStorage */ }
+  }, []);
+  const persistSubscriptions = (list) => {
+    setSubscriptions(list);
+    try { localStorage.setItem("voicemap_subscriptions", JSON.stringify(list)); } catch {}
+  };
+
   // ── Auth state ────────────────────────────────────────────────────────────
   const [user, setUser] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
@@ -474,6 +493,47 @@ export default function VoiceMap() {
     }
     mediaRecorderRef.current = null;
     setRecording(false);
+  };
+
+  // ─── SMS subscriptions ────────────────────────────────────────────────────
+  const subscribeAlerts = async () => {
+    if (!geoLocation) { setSubscribeMsg("Enable location first."); return; }
+    if (!phoneInput.trim()) { setSubscribeMsg("Enter a phone number."); return; }
+
+    setSubscribing(true);
+    setSubscribeMsg("");
+    try {
+      const res = await fetch("/api/subscriptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: phoneInput.trim(),
+          lat: geoLocation.lat,
+          lng: geoLocation.lng,
+          radius_meters: Math.round(alertPrefs.radius * 1609.34),
+          min_severity: alertPrefs.minSeverity,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to subscribe");
+      persistSubscriptions([
+        ...subscriptions,
+        { id: data.id, phone: phoneInput.trim(), radius: alertPrefs.radius, minSeverity: alertPrefs.minSeverity },
+      ]);
+      setPhoneInput("");
+      setSubscribeMsg("Subscribed. You'll get an SMS when an issue is reported in your area.");
+    } catch (e) {
+      setSubscribeMsg(e.message || "Subscribe failed");
+    } finally {
+      setSubscribing(false);
+    }
+  };
+
+  const unsubscribe = async (id) => {
+    try {
+      await fetch(`/api/subscriptions?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    } catch { /* still drop locally on network error */ }
+    persistSubscriptions(subscriptions.filter((s) => s.id !== id));
   };
 
   // ─── FastAPI voice pipeline ───────────────────────────────────────────────
@@ -1065,11 +1125,48 @@ export default function VoiceMap() {
                         Alerts for <span style={{ color: SEVERITIES[alertPrefs.minSeverity]?.color }}>{SEVERITIES[alertPrefs.minSeverity]?.label}</span> and above within <strong style={{ color: T.text }}>{alertPrefs.radius} mile{alertPrefs.radius !== 1 ? "s" : ""}</strong>.
                       </div>
                     </div>
+
+                    {/* SMS subscribe */}
+                    <div>
+                      <div style={{ fontSize: 11, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>📱 SMS alerts</div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input
+                          type="tel"
+                          autoComplete="tel"
+                          inputMode="tel"
+                          value={phoneInput}
+                          onChange={(e) => setPhoneInput(e.target.value)}
+                          placeholder="+1 555 123 4567"
+                          disabled={subscribing}
+                          style={{ flex: 1, padding: "10px 12px", borderRadius: 6, border: `1px solid ${T.border2}`, background: T.card, color: T.text, fontSize: 13, fontFamily: "'DM Sans', sans-serif" }}
+                        />
+                        <button
+                          onClick={subscribeAlerts}
+                          disabled={subscribing}
+                          style={{ padding: "10px 16px", borderRadius: 6, border: "1px solid #3BBFA3", background: "#3BBFA322", color: "#3BBFA3", fontSize: 12, fontWeight: 600, cursor: subscribing ? "wait" : "pointer", opacity: subscribing ? 0.6 : 1, fontFamily: "'DM Sans', sans-serif" }}
+                        >
+                          {subscribing ? "…" : "Subscribe"}
+                        </button>
+                      </div>
+                      {subscribeMsg && (
+                        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 6, lineHeight: 1.5 }}>{subscribeMsg}</div>
+                      )}
+                      {subscriptions.length > 0 && (
+                        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+                          {subscriptions.map((s) => (
+                            <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11, color: T.textFaint, padding: "6px 8px", background: T.card, borderRadius: 6, border: `1px solid ${T.border}` }}>
+                              <span style={{ fontFamily: "'DM Mono', monospace" }}>{s.phone} · {s.radius}mi · {s.minSeverity}+</span>
+                              <button onClick={() => unsubscribe(s.id)} style={{ background: "transparent", border: "none", color: "#D45F5F", fontSize: 11, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Unsubscribe</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
                 <button onClick={() => setAlertsOpen(false)}
                   style={{ padding: "12px", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #3BBFA3, #4A9EE0)", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>
-                  Save preferences
+                  Done
                 </button>
               </div>
             )}

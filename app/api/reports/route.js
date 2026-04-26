@@ -8,6 +8,7 @@ import {
 } from "@/lib/reports";
 import { findDuplicateCluster } from "@/lib/cluster";
 import { moderateReport } from "@/lib/moderation";
+import { dispatchSubscriberAlerts } from "@/lib/subscribers";
 
 const SEVERITY_UI = new Set(["low", "medium", "high", "emergency"]);
 
@@ -214,6 +215,12 @@ export async function POST(request) {
         }
 
         const report = mapReportRowToClient(row);
+
+        // Fire-and-forget — don't block the HTTP response on Twilio fan-out.
+        dispatchSubscriberAlerts(sql, report).catch((e) =>
+            console.warn("[reports.POST] subscriber dispatch failed:", e?.message ?? e)
+        );
+
         return Response.json({ report, id: report.id });
     } catch (e) {
         console.error(e);
