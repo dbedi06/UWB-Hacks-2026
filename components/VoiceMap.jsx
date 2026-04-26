@@ -779,7 +779,7 @@ export default function VoiceMap() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div style={{ display: "flex", height: "100vh", fontFamily: "'DM Sans', sans-serif", background: T.pageBg, color: T.text, position: "relative", overflow: "hidden" }}>
+    <div style={{ display: "flex", height: "100dvh", fontFamily: "'DM Sans', sans-serif", background: T.pageBg, color: T.text, position: "relative", overflow: "hidden" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
         @keyframes slideUp { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
