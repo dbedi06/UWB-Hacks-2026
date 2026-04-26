@@ -414,11 +414,10 @@ export default function VoiceMap() {
     map.on("click", e => {
       if (isDraggingRef.current) return;
       setSelected(null);
-      // If not logged in, redirect to Auth0 login
-      if (!userRef.current) {
-        window.location.href = "/auth/login";
-        return;
-      }
+      // Anonymous reporting is supported via sessionToken (see ensureSessionToken).
+      // We don't gate map-click on auth — users can submit reports without an
+      // Auth0 session, and the Sign in / Sign up buttons remain for those who
+      // want a persistent account.
       setClickedLatLng({ lat: e.latlng.lat, lng: e.latlng.lng });
       setPanelOpen(true);
       setTranscript("");
@@ -432,11 +431,17 @@ export default function VoiceMap() {
       spiderfyOnMaxZoom: true,
       iconCreateFunction: (c) => {
         const count = c.getChildCount();
-        const cats = c.getAllChildMarkers().map(m => m._report?.category).filter(Boolean);
-        const tally = {};
-        cats.forEach(cat => { tally[cat] = (tally[cat] || 0) + 1; });
-        const dominant = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0];
-        const color = (CATEGORIES[dominant] || CATEGORIES.other).color;
+        // Color by the HIGHEST severity in the cluster — same rationale as
+        // single-pin coloring: at-a-glance triage signal beats category mix.
+        const SEV_RANK = { low: 0, medium: 1, high: 2, emergency: 3 };
+        const sevs = c.getAllChildMarkers()
+          .map(m => m._report?.severity)
+          .filter(Boolean);
+        const top = sevs.reduce(
+          (best, s) => (SEV_RANK[s] ?? -1) > (SEV_RANK[best] ?? -1) ? s : best,
+          "low"
+        );
+        const color = (SEVERITIES[top] || SEVERITIES.low).color;
         return L.divIcon({
           html: `<div style="background:${color};color:white;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid #1a1a2e;box-shadow:0 0 12px rgba(0,0,0,0.6);font-family:'DM Mono',monospace;font-weight:600;font-size:13px">${count}</div>`,
           className: "vm-cluster",
@@ -852,6 +857,48 @@ export default function VoiceMap() {
           </div>
         </div>
 
+        {/* Signed-in pill — avatar + name (or "Anonymous" when no session) */}
+        <div style={{ padding: "10px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 10 }}>
+          {auth0User ? (
+            <>
+              {auth0User.picture ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={auth0User.picture}
+                  alt=""
+                  width={28}
+                  height={28}
+                  style={{ borderRadius: "50%", flexShrink: 0, border: `1px solid ${T.border2}` }}
+                />
+              ) : (
+                <div style={{ width: 28, height: 28, borderRadius: "50%", background: "linear-gradient(135deg, #3BBFA3, #4A9EE0)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
+                  {(displayName || "?").trim().charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={displayName}>
+                  {displayName || "Signed in"}
+                </div>
+                {auth0User.email && (
+                  <div style={{ fontSize: 10, color: T.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={auth0User.email}>
+                    {auth0User.email}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : authLoading ? (
+            <div style={{ fontSize: 11, color: T.textDim }}>Checking session…</div>
+          ) : (
+            <>
+              <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.card, border: `1px dashed ${T.border2}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 12 }}>👤</div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: T.text }}>Anonymous</div>
+                <div style={{ fontSize: 10, color: T.textMuted }}>Reports work without an account</div>
+              </div>
+            </>
+          )}
+        </div>
+
         {/* Stats */}
         <div style={{ padding: "14px 16px", borderBottom: `1px solid ${T.border}`, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {[
@@ -930,7 +977,7 @@ export default function VoiceMap() {
           ) : auth0User ? (
             <div>
               <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 8, lineHeight: 1.5 }}>
-                Signed in as <span style={{ color: T.text, fontWeight: 500 }}>{displayName}</span>. Click the map to report.
+                Click the map to report an issue.
               </div>
               <button
                 onClick={() => { window.location.href = "/auth/logout"; }}
@@ -941,7 +988,7 @@ export default function VoiceMap() {
             </div>
           ) : (
             <div>
-              <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 10px", lineHeight: 1.5 }}>Sign in to report issues or subscribe to alerts.</p>
+              <p style={{ fontSize: 11, color: T.textDim, margin: "0 0 10px", lineHeight: 1.5 }}>Click the map to report anonymously, or sign in for a persistent account.</p>
               <div style={{ display: "flex", gap: 6 }}>
                 <button
                   onClick={() => { window.location.href = "/auth/login"; }}
