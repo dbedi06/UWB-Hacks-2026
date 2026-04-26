@@ -425,7 +425,12 @@ export default function VoiceMap() {
   }, [reports, filter, mapReady]);
 
   // ─── Voice recording ──────────────────────────────────────────────────────
+  // Idempotency guard — pointer events shouldn't double-fire, but if they do
+  // (or if the user mashes the button), a second MediaRecorder would orphan
+  // the first and keep recording forever.
   const startRecording = async () => {
+    if (recording || isProcessing) return;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") return;
     setRecording(true);
     setTranscript("");
 
@@ -443,6 +448,7 @@ export default function VoiceMap() {
       mediaRecorderRef.current = mr;
     } catch (e) {
       console.error("Microphone unavailable:", e);
+      setRecording(false);
     }
 
     if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
@@ -459,10 +465,14 @@ export default function VoiceMap() {
   };
 
   const stopRecording = () => {
-    if (recognitionRef.current) recognitionRef.current.stop();
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch {}
+      recognitionRef.current = null;
     }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      try { mediaRecorderRef.current.stop(); } catch {}
+    }
+    mediaRecorderRef.current = null;
     setRecording(false);
   };
 
@@ -1086,12 +1096,36 @@ export default function VoiceMap() {
             {/* Voice button */}
             <div style={{ marginBottom: 16 }}>
               <button
-                onMouseDown={startRecording} onMouseUp={stopRecording}
-                onTouchStart={startRecording} onTouchEnd={stopRecording}
-                style={{ width: "100%", padding: "14px", borderRadius: 10, border: `2px solid ${recording ? "#3BBFA3" : T.border2}`, background: recording ? "#3BBFA322" : T.card, color: recording ? "#3BBFA3" : T.textFaint, fontSize: 13, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, transition: "all 0.15s", fontFamily: "'DM Sans', sans-serif" }}
+                disabled={isProcessing}
+                onPointerDown={(e) => {
+                  if (isProcessing) return;
+                  // Capture so pointerup fires here even if the pointer drifts
+                  // off the button — fixes the "still recording after release"
+                  // bug where mouseup landed outside and never reached us.
+                  e.currentTarget.setPointerCapture?.(e.pointerId);
+                  startRecording();
+                }}
+                onPointerUp={stopRecording}
+                onPointerCancel={stopRecording}
+                style={{
+                  width: "100%", padding: "14px", borderRadius: 10,
+                  border: `2px solid ${recording ? "#3BBFA3" : T.border2}`,
+                  background: recording ? "#3BBFA322" : T.card,
+                  color: recording ? "#3BBFA3" : T.textFaint,
+                  fontSize: 13, fontWeight: 500,
+                  cursor: isProcessing ? "wait" : "pointer",
+                  opacity: isProcessing ? 0.5 : 1,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  gap: 10, transition: "all 0.15s",
+                  fontFamily: "'DM Sans', sans-serif",
+                  // Prevent the browser from stealing touch (scroll, long-press
+                  // context menu) which would synthesize unmatched mouse events.
+                  touchAction: "none",
+                  userSelect: "none",
+                }}
               >
-                <span style={{ fontSize: 18 }}>{recording ? "🔴" : "🎙️"}</span>
-                {recording ? "Recording… release to stop" : "Hold to record voice report"}
+                <span style={{ fontSize: 18 }}>{isProcessing ? "⏳" : recording ? "🔴" : "🎙️"}</span>
+                {isProcessing ? "Parsing…" : recording ? "Recording… release to stop" : "Hold to record voice report"}
               </button>
               {isProcessing && (
                 <div style={{ textAlign: "center", fontSize: 11, color: T.textMuted, marginTop: 8 }}>Parsing with AI…</div>
