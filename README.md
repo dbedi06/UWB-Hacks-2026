@@ -1,5 +1,7 @@
 # VoiceMap
 
+#### By Leonid Kotok (leonikot@uw.edu), Abenezer Desta (masrjad@uw.edu), Jad Masri (aben3@uw.edu), and Dilshan Bedi (dbedi@uw.edu)
+
 > Voice your neighborhood's problems. We pin them on the map and alert nearby.
 
 VoiceMap is a civic incident-reporting app: residents speak (or type) what's broken in their area, and the issue lands as a pin on a live map. AI handles transcription, structured extraction, content moderation, and semantic deduplication. Subscribers get SMS / WhatsApp / email when new reports drop into their watch radius. Admins can fire an AI-summarized digest to City Hall on demand.
