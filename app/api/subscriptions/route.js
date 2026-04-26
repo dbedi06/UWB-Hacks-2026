@@ -66,6 +66,24 @@ export async function POST(request) {
   }
 
   try {
+    // Don't create duplicate rows when the same (phone, lat, lng, radius)
+    // tuple already exists — return the existing id instead. Prevents the
+    // SMS dispatcher from sending two messages to the same number when the
+    // user clicks Subscribe twice.
+    const radiusInt = Math.round(radius);
+    const existing = await sql`
+      SELECT id::text AS id
+      FROM subscriptions
+      WHERE contact_override = ${phone}::varchar(255)
+        AND ABS(center_lat - ${lat}::double precision) < 0.00001
+        AND ABS(center_lng - ${lng}::double precision) < 0.00001
+        AND radius_meters = ${radiusInt}
+      LIMIT 1
+    `;
+    if (existing.length > 0) {
+      return Response.json({ id: existing[0].id, dedup: true });
+    }
+
     const [row] = await sql`
       INSERT INTO subscriptions (
         contact_override, contact_preference,
@@ -77,7 +95,7 @@ export async function POST(request) {
         'sms'::contact_preference,
         ${lat}::double precision,
         ${lng}::double precision,
-        ${Math.round(radius)}::int,
+        ${radiusInt}::int,
         ${categoryFilter}::text[],
         ${minSeverity}::severity_level
       )
