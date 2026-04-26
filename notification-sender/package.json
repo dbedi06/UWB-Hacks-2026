@@ -1,0 +1,10 @@
+{
+  "name": "voicemap-notification-sender",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@aws-sdk/client-ses": "^3.750.0",
+    "pg": "^8.14.0"
+  }
+}

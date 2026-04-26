@@ -112,8 +112,10 @@ CREATE TABLE subscriptions (
   id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id            UUID REFERENCES users(id) ON DELETE CASCADE,
 
-  -- Used when subscribing without an account
+  -- Used when subscribing without an account. For "both", phone here and email
+  -- in contact_email (so SES and Twilio get the right value).
   contact_override   VARCHAR(255),
+  contact_email      VARCHAR(255),
   contact_preference contact_preference NOT NULL DEFAULT 'email',
 
   -- Geographic watch area
@@ -531,7 +533,14 @@ RETURNS TABLE (
   SELECT
     n.id,
     n.channel,
-    COALESCE(u.email, u.phone, s.contact_override) AS contact,
+    COALESCE(
+      NULLIF(TRIM(s.contact_email), ''),
+      u.email,
+      CASE
+        WHEN s.contact_preference = 'email' THEN NULLIF(TRIM(s.contact_override), '')
+        ELSE NULL
+      END
+    ) AS contact,
     r.id,
     r.category,
     r.severity,

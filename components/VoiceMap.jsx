@@ -179,11 +179,20 @@ export default function VoiceMap() {
   const [geoError, setGeoError] = useState(false);
   const [alertPrefs, setAlertPrefs] = useState({ enabled: false, radius: 1, minSeverity: "medium" });
 
-  // SMS subscription state
+  // Alert subscription state (email, SMS, or both — backend routes email via SES poller)
+  const [alertDelivery, setAlertDelivery] = useState(/** @type {"sms"|"email"|"both"} */ ("sms"));
+  const [emailInput, setEmailInput] = useState("");
   const [phoneInput, setPhoneInput] = useState("");
   const [subscriptions, setSubscriptions] = useState([]);
   const [subscribing, setSubscribing] = useState(false);
   const [subscribeMsg, setSubscribeMsg] = useState("");
+
+  useEffect(() => {
+    if (!alertsOpen) return;
+    if (auth0User?.email && (alertDelivery === "email" || alertDelivery === "both")) {
+      setEmailInput((prev) => (prev.trim() ? prev : auth0User.email));
+    }
+  }, [alertsOpen, alertDelivery, auth0User?.email]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -559,33 +568,60 @@ export default function VoiceMap() {
     setRecording(false);
   };
 
-  // ─── SMS subscriptions ────────────────────────────────────────────────────
+  // ─── Alert subscriptions (SMS/WhatsApp, email, or both) ──────────────────
   const subscribeAlerts = async () => {
     if (!geoLocation) { setSubscribeMsg("Enable location first."); return; }
-    if (!phoneInput.trim()) { setSubscribeMsg("Enter a phone number."); return; }
+    if (alertDelivery === "sms" || alertDelivery === "both") {
+      if (!phoneInput.trim()) { setSubscribeMsg("Enter a phone number."); return; }
+    }
+    if (alertDelivery === "email" || alertDelivery === "both") {
+      if (!emailInput.trim()) { setSubscribeMsg("Enter an email address."); return; }
+    }
 
     setSubscribing(true);
     setSubscribeMsg("");
     try {
+      const userId = parseUuid(neonUser?.id);
       const res = await fetch("/api/subscriptions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          phone: phoneInput.trim(),
+          contact_preference: alertDelivery,
+          email: (alertDelivery === "email" || alertDelivery === "both") ? emailInput.trim() : undefined,
+          phone: (alertDelivery === "sms" || alertDelivery === "both") ? phoneInput.trim() : undefined,
           lat: geoLocation.lat,
           lng: geoLocation.lng,
           radius_meters: Math.round(alertPrefs.radius * 1609.34),
           min_severity: alertPrefs.minSeverity,
+          ...(userId ? { userId } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to subscribe");
-      persistSubscriptions([
-        ...subscriptions,
-        { id: data.id, phone: phoneInput.trim(), radius: alertPrefs.radius, minSeverity: alertPrefs.minSeverity },
-      ]);
-      setPhoneInput("");
-      setSubscribeMsg("Subscribed. You'll get an SMS when an issue is reported in your area.");
+      if (data.dedup) {
+        setSubscribeMsg("You already have this alert for the same area and contact.");
+        return;
+      }
+      const entry = {
+        id: data.id,
+        delivery: alertDelivery,
+        radius: alertPrefs.radius,
+        minSeverity: alertPrefs.minSeverity,
+        ...(alertDelivery === "email" || alertDelivery === "both" ? { email: emailInput.trim() } : {}),
+        ...(alertDelivery === "sms" || alertDelivery === "both" ? { phone: phoneInput.trim() } : {}),
+      };
+      persistSubscriptions([...subscriptions, entry]);
+      if (alertDelivery === "email") {
+        setEmailInput("");
+        setSubscribeMsg("Subscribed. You'll get email alerts (via AWS SES) for issues in this area.");
+      } else if (alertDelivery === "both") {
+        setPhoneInput("");
+        setEmailInput((prev) => (auth0User?.email ? auth0User.email : prev));
+        setSubscribeMsg("Subscribed. You'll get SMS and email for issues in this area.");
+      } else {
+        setPhoneInput("");
+        setSubscribeMsg("Subscribed. You'll get an SMS when an issue is reported in your area.");
+      }
     } catch (e) {
       setSubscribeMsg(e.message || "Subscribe failed");
     } finally {
@@ -1162,39 +1198,99 @@ export default function VoiceMap() {
                       </div>
                     </div>
 
-                    {/* SMS subscribe */}
+                    {/* Delivery: SMS/WhatsApp, email (SES), or both */}
                     <div>
-                      <div style={{ fontSize: 11, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>📱 SMS alerts</div>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <input
-                          type="tel"
-                          autoComplete="tel"
-                          inputMode="tel"
-                          value={phoneInput}
-                          onChange={(e) => setPhoneInput(e.target.value)}
-                          placeholder="+1 555 123 4567"
-                          disabled={subscribing}
-                          style={{ flex: 1, padding: "10px 12px", borderRadius: 6, border: `1px solid ${T.border2}`, background: T.card, color: T.text, fontSize: 13, fontFamily: "'DM Sans', sans-serif" }}
-                        />
-                        <button
-                          onClick={subscribeAlerts}
-                          disabled={subscribing}
-                          style={{ padding: "10px 16px", borderRadius: 6, border: "1px solid #3BBFA3", background: "#3BBFA322", color: "#3BBFA3", fontSize: 12, fontWeight: 600, cursor: subscribing ? "wait" : "pointer", opacity: subscribing ? 0.6 : 1, fontFamily: "'DM Sans', sans-serif" }}
-                        >
-                          {subscribing ? "…" : "Subscribe"}
-                        </button>
+                      <div style={{ fontSize: 11, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>How to notify you</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                        {[
+                          { id: "sms", label: "Phone (SMS / WhatsApp)" },
+                          { id: "email", label: "Email" },
+                          { id: "both", label: "Email + phone" },
+                        ].map((opt) => {
+                          const active = alertDelivery === opt.id;
+                          return (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => setAlertDelivery(/** @type {"sms"|"email"|"both"} */(opt.id))}
+                              style={{
+                                padding: "8px 12px",
+                                borderRadius: 6,
+                                fontSize: 11,
+                                fontWeight: 600,
+                                border: `1px solid ${active ? "#3BBFA3" : T.border2}`,
+                                background: active ? "#3BBFA322" : T.card,
+                                color: active ? "#3BBFA3" : T.textMuted,
+                                cursor: "pointer",
+                                fontFamily: "'DM Sans', sans-serif",
+                              }}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
                       </div>
+                      {(alertDelivery === "email" || alertDelivery === "both") && (
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 4 }}>Email</div>
+                          <input
+                            type="email"
+                            autoComplete="email"
+                            value={emailInput}
+                            onChange={(e) => setEmailInput(e.target.value)}
+                            placeholder="you@example.com"
+                            disabled={subscribing}
+                            style={{ width: "100%", padding: "10px 12px", borderRadius: 6, border: `1px solid ${T.border2}`, background: T.card, color: T.text, fontSize: 13, fontFamily: "'DM Sans', sans-serif" }}
+                          />
+                        </div>
+                      )}
+                      {(alertDelivery === "sms" || alertDelivery === "both") && (
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 4 }}>Phone (E.164 — include country code)</div>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <input
+                              type="tel"
+                              autoComplete="tel"
+                              inputMode="tel"
+                              value={phoneInput}
+                              onChange={(e) => setPhoneInput(e.target.value)}
+                              placeholder="+1 555 123 4567"
+                              disabled={subscribing}
+                              style={{ flex: 1, padding: "10px 12px", borderRadius: 6, border: `1px solid ${T.border2}`, background: T.card, color: T.text, fontSize: 13, fontFamily: "'DM Sans', sans-serif" }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={subscribeAlerts}
+                        disabled={subscribing}
+                        style={{ width: "100%", padding: "10px 16px", borderRadius: 6, border: "1px solid #3BBFA3", background: "#3BBFA322", color: "#3BBFA3", fontSize: 12, fontWeight: 600, cursor: subscribing ? "wait" : "pointer", opacity: subscribing ? 0.6 : 1, fontFamily: "'DM Sans', sans-serif" }}
+                      >
+                        {subscribing ? "…" : "Subscribe to alerts"}
+                      </button>
                       {subscribeMsg && (
                         <div style={{ fontSize: 11, color: T.textMuted, marginTop: 6, lineHeight: 1.5 }}>{subscribeMsg}</div>
                       )}
                       {subscriptions.length > 0 && (
                         <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
-                          {subscriptions.map((s) => (
-                            <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11, color: T.textFaint, padding: "6px 8px", background: T.card, borderRadius: 6, border: `1px solid ${T.border}` }}>
-                              <span style={{ fontFamily: "'DM Mono', monospace" }}>{s.phone} · {s.radius}mi · {s.minSeverity}+</span>
-                              <button onClick={() => unsubscribe(s.id)} style={{ background: "transparent", border: "none", color: "#D45F5F", fontSize: 11, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Unsubscribe</button>
-                            </div>
-                          ))}
+                          {subscriptions.map((s) => {
+                            const d = s.delivery || "sms";
+                            const contactLabel =
+                              d === "email"
+                                ? (s.email || "email")
+                                : d === "both"
+                                  ? `${s.email || "?"} + ${s.phone || "?"}`
+                                  : (s.phone || "phone");
+                            return (
+                              <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11, color: T.textFaint, padding: "6px 8px", background: T.card, borderRadius: 6, border: `1px solid ${T.border}` }}>
+                                <span style={{ fontFamily: "'DM Mono', monospace" }} title={contactLabel}>
+                                  [{d === "email" ? "email" : d === "both" ? "both" : "SMS"}] {contactLabel} · {s.radius}mi · {s.minSeverity}+
+                                </span>
+                                <button onClick={() => unsubscribe(s.id)} style={{ background: "transparent", border: "none", color: "#D45F5F", fontSize: 11, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Unsubscribe</button>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>

@@ -1,18 +1,27 @@
 import { getSql } from "@/lib/db";
 import { ISSUE_KEYS, parseUuid, uiSeverityToDb } from "@/lib/reports";
 import { normalizeE164 } from "@/lib/sms";
+import { normalizeEmail } from "@/lib/email";
 
 const DB_UNCONFIGURED = {
   error: "Database not configured.",
 };
 
-const RADIUS_MIN = 100;       // 100m floor — anything tighter is jitter
-const RADIUS_MAX = 100_000;   // 100km ceiling — at this scale, just opt into "all"
+const RADIUS_MIN = 100; // 100m floor — anything tighter is jitter
+const RADIUS_MAX = 100_000; // 100km ceiling — at this scale, just opt into "all"
+
+const PREFS = new Set(["email", "sms", "both"]);
 
 /**
  * POST: create a subscription.
- * Body: { phone, lat, lng, radius_meters, min_severity?, category_filter? }
- * Returns: { id }
+ * Body: {
+ *   contact_preference: 'email' | 'sms' | 'both',
+ *   email?: string,        // required for email, both
+ *   phone?: string,        // required for sms, both
+ *   lat, lng, radius_meters, min_severity?, category_filter?,
+ *   userId?: string        // optional Neon user UUID
+ * }
+ * Returns: { id, dedup?: true }
  */
 export async function POST(request) {
   const sql = getSql();
@@ -25,10 +34,30 @@ export async function POST(request) {
     return Response.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const phone = normalizeE164(body.phone);
-  if (!phone) {
+  const prefRaw = typeof body.contact_preference === "string" ? body.contact_preference.toLowerCase() : "sms";
+  if (!PREFS.has(prefRaw)) {
     return Response.json(
-      { error: "A valid phone number is required (E.164 format)." },
+      { error: "contact_preference must be email, sms, or both." },
+      { status: 400 }
+    );
+  }
+  const contactPref = /** @type {"email" | "sms" | "both"} */ (prefRaw);
+
+  const email = normalizeEmail(typeof body.email === "string" ? body.email : "");
+  const phone = normalizeE164(typeof body.phone === "string" ? body.phone : "");
+
+  if (contactPref === "email" && !email) {
+    return Response.json({ error: "A valid email is required for email alerts." }, { status: 400 });
+  }
+  if (contactPref === "sms" && !phone) {
+    return Response.json(
+      { error: "A valid phone number is required (E.164 format) for SMS alerts." },
+      { status: 400 }
+    );
+  }
+  if (contactPref === "both" && (!email || !phone)) {
+    return Response.json(
+      { error: "Both email and phone are required when contact_preference is 'both'." },
       { status: 400 }
     );
   }
@@ -65,34 +94,94 @@ export async function POST(request) {
     categoryFilter = filtered;
   }
 
+  const userId = parseUuid(body.userId ?? body.user_id);
+
+  /** Primary row key for contact_override: phone for sms/both, email for email-only */
+  const contactOverride =
+    contactPref === "email" ? email : phone;
+
+  const contactEmail = contactPref === "both" ? email : null;
+
+  const radiusInt = Math.round(radius);
+
   try {
-    // Don't create duplicate rows when the same (phone, lat, lng, radius)
-    // tuple already exists — return the existing id instead. Prevents the
-    // SMS dispatcher from sending two messages to the same number when the
-    // user clicks Subscribe twice.
-    const radiusInt = Math.round(radius);
-    const existing = await sql`
-      SELECT id::text AS id
-      FROM subscriptions
-      WHERE contact_override = ${phone}::varchar(255)
-        AND ABS(center_lat - ${lat}::double precision) < 0.00001
-        AND ABS(center_lng - ${lng}::double precision) < 0.00001
-        AND radius_meters = ${radiusInt}
-      LIMIT 1
-    `;
+    // Dedup: same preference + same geo + same radius + same contact(s)
+    let existing;
+    if (contactPref === "email") {
+      existing = await sql`
+        SELECT id::text AS id
+        FROM subscriptions
+        WHERE contact_preference = 'email'
+          AND LOWER(TRIM(contact_override)) = ${email}
+          AND (contact_email IS NULL OR contact_email = '')
+          AND ABS(center_lat - ${lat}::double precision) < 0.00001
+          AND ABS(center_lng - ${lng}::double precision) < 0.00001
+          AND radius_meters = ${radiusInt}
+        LIMIT 1
+      `;
+    } else if (contactPref === "sms") {
+      existing = await sql`
+        SELECT id::text AS id
+        FROM subscriptions
+        WHERE contact_preference = 'sms'
+          AND contact_override = ${phone}::varchar(255)
+          AND (contact_email IS NULL OR contact_email = '')
+          AND ABS(center_lat - ${lat}::double precision) < 0.00001
+          AND ABS(center_lng - ${lng}::double precision) < 0.00001
+          AND radius_meters = ${radiusInt}
+        LIMIT 1
+      `;
+    } else {
+      existing = await sql`
+        SELECT id::text AS id
+        FROM subscriptions
+        WHERE contact_preference = 'both'
+          AND contact_override = ${phone}::varchar(255)
+          AND LOWER(TRIM(COALESCE(contact_email, ''))) = ${email}
+          AND ABS(center_lat - ${lat}::double precision) < 0.00001
+          AND ABS(center_lng - ${lng}::double precision) < 0.00001
+          AND radius_meters = ${radiusInt}
+        LIMIT 1
+      `;
+    }
+
     if (existing.length > 0) {
       return Response.json({ id: existing[0].id, dedup: true });
     }
 
+    if (userId) {
+      const [row] = await sql`
+        INSERT INTO subscriptions (
+          user_id, contact_override, contact_email, contact_preference,
+          center_lat, center_lng, radius_meters,
+          category_filter, min_severity
+        )
+        VALUES (
+          ${userId}::uuid,
+          ${contactOverride}::varchar(255),
+          ${contactEmail}::varchar(255),
+          ${contactPref}::contact_preference,
+          ${lat}::double precision,
+          ${lng}::double precision,
+          ${radiusInt}::int,
+          ${categoryFilter}::text[],
+          ${minSeverity}::severity_level
+        )
+        RETURNING id::text AS id
+      `;
+      return Response.json({ id: row.id });
+    }
+
     const [row] = await sql`
       INSERT INTO subscriptions (
-        contact_override, contact_preference,
+        contact_override, contact_email, contact_preference,
         center_lat, center_lng, radius_meters,
         category_filter, min_severity
       )
       VALUES (
-        ${phone}::varchar(255),
-        'sms'::contact_preference,
+        ${contactOverride}::varchar(255),
+        ${contactEmail}::varchar(255),
+        ${contactPref}::contact_preference,
         ${lat}::double precision,
         ${lng}::double precision,
         ${radiusInt}::int,
@@ -104,6 +193,13 @@ export async function POST(request) {
     return Response.json({ id: row.id });
   } catch (e) {
     console.error("[subscriptions.POST]", e);
+    // Helpful if migration 003 (contact_email) not applied
+    if (e?.code === "42703" || /contact_email/.test(String(e?.message || ""))) {
+      return Response.json(
+        { error: "Database is missing column contact_email. Run DB/003_subscriptions_contact_email.sql on Neon." },
+        { status: 503 }
+      );
+    }
     return Response.json({ error: "Failed to create subscription." }, { status: 500 });
   }
 }
