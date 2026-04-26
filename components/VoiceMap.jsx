@@ -86,7 +86,7 @@ const SEED_REPORTS = [
 function createPinSVG(category, severity, status, count = null) {
   const cat = CATEGORIES[category] || CATEGORIES.other;
   const sev = SEVERITIES[severity] || SEVERITIES.low;
-  const color = STATUS_COLOR[status] ?? STATUS_COLOR.active;
+  const color = sev.color;
   const r = sev.ring;
   const total = r * 2 + 6;
   const cx = total / 2;
@@ -332,10 +332,9 @@ export default function VoiceMap() {
       center: BOTHELL_CENTER,
       zoom: 14,
       zoomControl: false,
-      // Floor: zoomed out to roughly all of WA + neighboring states.
-      // Anything below 5 starts showing tile wrap; this is a comfortable
-      // "regional context" floor.
-      minZoom: 7,
+      // Floor: country-wide view. noWrap on the tile layer keeps the world
+      // from repeating horizontally even at this scale.
+      minZoom: 4,
       maxZoom: 19,
       worldCopyJump: false,
     });
@@ -343,7 +342,7 @@ export default function VoiceMap() {
     const tl = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
       attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
       subdomains: "abcd",
-      minZoom: 7,
+      minZoom: 4,
       maxZoom: 19,
       noWrap: true,           // don't repeat tiles horizontally past lng ±180
     }).addTo(map);
@@ -763,12 +762,12 @@ export default function VoiceMap() {
           ))}
         </div>
 
-        {/* Status legend */}
+        {/* Severity legend — pin color reflects severity */}
         <div style={{ padding: "10px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", gap: 12 }}>
-          {Object.entries(STATUS_COLOR).filter(([, c]) => c !== null).map(([k, c]) => (
+          {Object.entries(SEVERITIES).map(([k, s]) => (
             <div key={k} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <div style={{ width: 10, height: 10, borderRadius: "50%", background: c }} />
-              <span style={{ fontSize: 11, color: T.textMuted, textTransform: "capitalize" }}>{k}</span>
+              <div style={{ width: 10, height: 10, borderRadius: "50%", background: s.color }} />
+              <span style={{ fontSize: 11, color: T.textMuted, textTransform: "capitalize" }}>{s.label}</span>
             </div>
           ))}
         </div>
