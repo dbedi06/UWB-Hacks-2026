@@ -333,6 +333,38 @@ export default function VoiceMap() {
     refreshReports();
   }, [refreshReports]);
 
+  // Keep a ref to the latest reports so the polling tick can re-resolve
+  // `selected` by id after a refresh without re-creating the interval.
+  const reportsRef = useRef(reports);
+  useEffect(() => { reportsRef.current = reports; }, [reports]);
+
+  // ─── Live polling ─────────────────────────────────────────────────────────
+  // Re-fetch every 10s so new reports posted by other clients show up
+  // without a page reload. Paused while the tab is hidden, with a catch-up
+  // fetch on return so the user never sees a stale map after switching back.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let id = null;
+    const tick = async () => {
+      if (document.visibilityState !== "visible") return;
+      await refreshReports();
+      // Re-bind selected to the freshly-fetched object so the open detail
+      // panel reflects updates (e.g. report_count ticking after dedup).
+      setSelected((cur) =>
+        cur ? (reportsRef.current.find((r) => r.id === cur.id) ?? cur) : cur
+      );
+    };
+    const start = () => { if (id == null) id = setInterval(tick, 10000); };
+    const stop  = () => { if (id != null) { clearInterval(id); id = null; } };
+    const onVis = () => {
+      if (document.visibilityState === "visible") { tick(); start(); }
+      else stop();
+    };
+    start();
+    document.addEventListener("visibilitychange", onVis);
+    return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
+  }, [refreshReports]);
+
   // ─── Load Leaflet ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (typeof window === "undefined" || leafletRef.current) return;
