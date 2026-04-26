@@ -24,6 +24,14 @@ ALLOWED_ORIGINS = [
     ).split(",") if o.strip()
 ]
 
+# Quick tunnels (cloudflared / ngrok) hand out fresh hostnames on every
+# restart, so an explicit list would rot. The regex matches any
+# trycloudflare.com or ngrok subdomain — used in addition to ALLOWED_ORIGINS.
+ALLOWED_ORIGIN_REGEX = os.getenv(
+    "ALLOWED_ORIGIN_REGEX",
+    r"https://([a-z0-9-]+\.)?(trycloudflare\.com|ngrok-free\.app|ngrok\.app|ngrok\.io)",
+)
+
 # ─── Audio constants ──────────────────────────────────────────────────
 MAX_AUDIO_BYTES = 5 * 1024 * 1024            # 5 MB
 MIN_AUDIO_BYTES = 1_000                       # 1 KB
