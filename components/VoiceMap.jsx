@@ -423,7 +423,9 @@ export default function VoiceMap() {
     }).addTo(map);
     tileLayerRef.current = tl;
 
-    L.control.zoom({ position: "bottomright" }).addTo(map);
+    // Zoom controls in the bottom-left frees up the bottom-right for the
+    // CARTO attribution + the iOS home-bar safe area without overlap.
+    L.control.zoom({ position: "bottomleft" }).addTo(map);
 
     map.on("dragstart", () => { isDraggingRef.current = true; });
     map.on("dragend", () => { setTimeout(() => { isDraggingRef.current = false; }, 50); });
