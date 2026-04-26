@@ -114,6 +114,7 @@ export default function VoiceMap() {
   const markersRef = useRef({});
   const clusterRef = useRef(null);
   const userMarkerRef = useRef(null);
+  const radiusCircleRef = useRef(null);
   const userRef = useRef(null);
   const recognitionRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -177,15 +178,25 @@ export default function VoiceMap() {
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [geoLocation, setGeoLocation] = useState(null);
   const [geoError, setGeoError] = useState(false);
-  const [alertPrefs, setAlertPrefs] = useState({ enabled: false, radius: 1, minSeverity: "medium" });
+  // Channels are independent toggles ("Enable alerts" used to be a single
+  // checkbox; now SMS and Email each have their own). The form below shows
+  // when at least one is on, and `alertContactPref` is derived from the
+  // pair right before the API call.
+  const [alertPrefs, setAlertPrefs] = useState({ sms: true, email: false, radius: 1, minSeverity: "medium" });
 
   // SMS subscription state
   const [phoneInput, setPhoneInput] = useState("");
   const [emailInput, setEmailInput] = useState("");
-  const [alertContactPref, setAlertContactPref] = useState(/** @type {'sms'|'email'|'both'} */("sms"));
+  // Kept for backwards-compat with existing references in the subscribe
+  // handler; derived from alertPrefs.sms/email at every render.
+  const alertContactPref = alertPrefs.sms && alertPrefs.email ? "both"
+    : alertPrefs.email ? "email"
+    : "sms";
   const [subscriptions, setSubscriptions] = useState([]);
   const [subscribing, setSubscribing] = useState(false);
   const [subscribeMsg, setSubscribeMsg] = useState("");
+  const [digestSending, setDigestSending] = useState(false);
+  const [digestMsg, setDigestMsg] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -282,6 +293,48 @@ export default function VoiceMap() {
       }).addTo(map);
     }
   }, [geoLocation, mapReady]);
+
+  // ─── Alert-radius preview circle ──────────────────────────────────────────
+  // Draw a brand-colored circle on the map showing the configured alert
+  // radius, centered on the user's geolocation. Only visible while the
+  // Alerts panel is open and at least one channel is enabled, so the user
+  // can see at-a-glance what 0.25mi vs 5mi actually covers.
+  useEffect(() => {
+    if (!mapReady || !leafletRef.current) return;
+    const L = window.L;
+    const map = leafletRef.current;
+
+    const shouldShow =
+      alertsOpen &&
+      geoLocation &&
+      (alertPrefs.sms || alertPrefs.email);
+
+    if (!shouldShow) {
+      if (radiusCircleRef.current) {
+        map.removeLayer(radiusCircleRef.current);
+        radiusCircleRef.current = null;
+      }
+      return;
+    }
+
+    const radiusMeters = alertPrefs.radius * 1609.34; // miles → meters
+    const center = [geoLocation.lat, geoLocation.lng];
+
+    if (radiusCircleRef.current) {
+      radiusCircleRef.current.setLatLng(center);
+      radiusCircleRef.current.setRadius(radiusMeters);
+    } else {
+      radiusCircleRef.current = L.circle(center, {
+        radius: radiusMeters,
+        color: "#3BBFA3",
+        fillColor: "#3BBFA3",
+        fillOpacity: 0.12,
+        weight: 2,
+        dashArray: "6,6",
+        interactive: false,
+      }).addTo(map);
+    }
+  }, [alertsOpen, geoLocation, alertPrefs.radius, alertPrefs.sms, alertPrefs.email, mapReady]);
 
   // ─── Fetch live reports on mount ──────────────────────────────────────────
   const normalizeStatus = (s) => {
@@ -562,6 +615,31 @@ export default function VoiceMap() {
   };
 
   // ─── Alert subscriptions (SMS + email) ────────────────────────────────────
+  // ─── City Hall digest ─────────────────────────────────────────────────────
+  const sendCityHallDigest = async () => {
+    setDigestSending(true);
+    setDigestMsg("");
+    try {
+      const res = await fetch("/api/digest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || `Failed (HTTP ${res.status})`);
+      }
+      const noun = data.totalReports === 1 ? "report" : "reports";
+      setDigestMsg(`✓ Sent to ${data.recipient} — ${data.totalReports} ${noun} summarized.`);
+      // Auto-clear after 8s
+      setTimeout(() => setDigestMsg(""), 8000);
+    } catch (e) {
+      setDigestMsg(e.message || "Digest send failed.");
+    } finally {
+      setDigestSending(false);
+    }
+  };
+
   const subscribeAlerts = async () => {
     if (!geoLocation) { setSubscribeMsg("Enable location first."); return; }
 
@@ -1126,7 +1204,10 @@ export default function VoiceMap() {
 
       {/* ── Alerts modal ──────────────────────────────────────────── */}
       {alertsOpen && (
-        <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 3000, padding: 24 }}>
+        // Dimmer backdrop is intentionally light (0.3 vs 0.6 for the submit
+        // panel) so the alert-radius preview circle on the map underneath
+        // stays visible while the user picks 0.25 / 0.5 / 1 / 2 / 5 miles.
+        <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 3000, padding: 24 }}>
           <div style={{ ...modalBox, maxWidth: 420 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <div>
@@ -1135,6 +1216,41 @@ export default function VoiceMap() {
               </div>
               <button onClick={() => setAlertsOpen(false)} style={closeBtn}>×</button>
             </div>
+
+            {/* City Hall digest — admin-style action; lives at the top of the
+                Alerts panel since it's adjacent in concept (notify city instead
+                of individual subscribers). */}
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 18 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: T.text, marginBottom: 2 }}>📨 City Hall digest</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, lineHeight: 1.4 }}>AI-summarized email of the last 24h of reports.</div>
+                </div>
+                <button
+                  onClick={sendCityHallDigest}
+                  disabled={digestSending}
+                  style={{
+                    flexShrink: 0,
+                    padding: "8px 14px",
+                    borderRadius: 6,
+                    border: "1px solid #4A9EE0",
+                    background: "#4A9EE022",
+                    color: "#4A9EE0",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: digestSending ? "wait" : "pointer",
+                    opacity: digestSending ? 0.6 : 1,
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  {digestSending ? "Sending…" : "Send now"}
+                </button>
+              </div>
+              {digestMsg && (
+                <div style={{ fontSize: 11, color: digestMsg.startsWith("✓") ? "#3BBFA3" : "#D45F5F", marginTop: 8, lineHeight: 1.5 }}>{digestMsg}</div>
+              )}
+            </div>
+
             {geoError || !geoLocation ? (
               <div style={{ textAlign: "center", padding: "24px 0" }}>
                 <div style={{ fontSize: 32, marginBottom: 12 }}>📍</div>
@@ -1149,14 +1265,31 @@ export default function VoiceMap() {
                 <div style={{ fontSize: 11, color: "#3BBFA3", fontFamily: "'DM Mono', monospace", background: "#3BBFA311", borderRadius: 6, padding: "6px 10px" }}>
                   ✓ Location detected: {geoLocation.lat.toFixed(4)}, {geoLocation.lng.toFixed(4)}
                 </div>
-                <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
-                  <input type="checkbox" checked={alertPrefs.enabled} onChange={e => setAlertPrefs(p => ({ ...p, enabled: e.target.checked }))} style={{ width: 16, height: 16, accentColor: "#3BBFA3", cursor: "pointer" }} />
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>Enable alerts</div>
-                    <div style={{ fontSize: 11, color: T.textMuted }}>Receive notifications for new issues near you</div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: T.text, marginBottom: 4 }}>Enable alerts</div>
+                  <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 10 }}>Pick at least one channel to be notified</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "10px 12px", borderRadius: 6, border: `1px solid ${alertPrefs.sms ? "#3BBFA3" : T.border2}`, background: alertPrefs.sms ? "#3BBFA322" : T.card }}>
+                      <input
+                        type="checkbox"
+                        checked={alertPrefs.sms}
+                        onChange={e => setAlertPrefs(p => ({ ...p, sms: e.target.checked }))}
+                        style={{ width: 14, height: 14, accentColor: "#3BBFA3", cursor: "pointer" }}
+                      />
+                      <span style={{ fontSize: 12, fontWeight: 500, color: alertPrefs.sms ? "#3BBFA3" : T.textFaint }}>📱 SMS</span>
+                    </label>
+                    <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "10px 12px", borderRadius: 6, border: `1px solid ${alertPrefs.email ? "#3BBFA3" : T.border2}`, background: alertPrefs.email ? "#3BBFA322" : T.card }}>
+                      <input
+                        type="checkbox"
+                        checked={alertPrefs.email}
+                        onChange={e => setAlertPrefs(p => ({ ...p, email: e.target.checked }))}
+                        style={{ width: 14, height: 14, accentColor: "#3BBFA3", cursor: "pointer" }}
+                      />
+                      <span style={{ fontSize: 12, fontWeight: 500, color: alertPrefs.email ? "#3BBFA3" : T.textFaint }}>✉️ Email</span>
+                    </label>
                   </div>
-                </label>
-                {alertPrefs.enabled && (
+                </div>
+                {(alertPrefs.sms || alertPrefs.email) && (
                   <>
                     <div>
                       <div style={{ fontSize: 11, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Alert radius</div>
@@ -1187,30 +1320,8 @@ export default function VoiceMap() {
                       </div>
                     </div>
 
-                    {/* Subscribe (SMS / Email / Both) */}
+                    {/* Subscribe — channel selection lives at the top now */}
                     <div>
-                      <div style={{ fontSize: 11, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>🔔 Delivery</div>
-                      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-                        {[
-                          { k: "sms", label: "📱 SMS" },
-                          { k: "email", label: "✉️ Email" },
-                          { k: "both", label: "Both" },
-                        ].map(({ k, label }) => {
-                          const active = alertContactPref === k;
-                          return (
-                            <button
-                              key={k}
-                              type="button"
-                              onClick={() => setAlertContactPref(k)}
-                              disabled={subscribing}
-                              style={{ flex: 1, padding: "8px 0", borderRadius: 6, fontSize: 11, fontWeight: 600, border: `1px solid ${active ? "#3BBFA3" : T.border2}`, background: active ? "#3BBFA322" : T.card, color: active ? "#3BBFA3" : T.textFaint, cursor: subscribing ? "wait" : "pointer", fontFamily: "'DM Sans', sans-serif" }}
-                            >
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-
                       {alertContactPref !== "email" && (
                         <input
                           type="tel"
