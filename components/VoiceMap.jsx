@@ -143,6 +143,23 @@ export default function VoiceMap() {
   const [reports, setReports] = useState(SEED_REPORTS);
   const [selected, setSelected] = useState(null);
   const [panelOpen, setPanelOpen] = useState(false);
+
+  // Mobile slide-over drawer. Sidebar is a normal flex child on desktop;
+  // on screens narrower than 768px it becomes an absolutely-positioned
+  // drawer that slides in from the left.
+  const [isMobile, setIsMobile] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const check = () => {
+      const m = window.innerWidth < 768;
+      setIsMobile(m);
+      setSidebarOpen(!m);
+    };
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
   const [form, setForm] = useState({ title: "", category: "pothole", other_type: "", severity: "medium", impact_summary: "" });
   const [clickedLatLng, setClickedLatLng] = useState(null);
   const [recording, setRecording] = useState(false);
@@ -747,6 +764,8 @@ export default function VoiceMap() {
     width: "100%", background: T.sidebar, borderRadius: 16,
     border: `1px solid ${T.border}`, padding: 28,
     boxShadow: "0 24px 64px rgba(0,0,0,0.8)", animation: "slideUp 0.25s ease",
+    // Keep modal scrollable inside the viewport on small screens
+    maxHeight: "calc(100vh - 48px)", overflowY: "auto",
   };
   const closeBtn = {
     background: T.card, border: "none", borderRadius: 6,
@@ -769,7 +788,21 @@ export default function VoiceMap() {
       `}</style>
 
       {/* ── Sidebar ──────────────────────────────────────────────── */}
-      <aside style={{ width: 260, background: T.sidebar, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", zIndex: 10, flexShrink: 0 }}>
+      <aside style={{
+        width: 260,
+        background: T.sidebar,
+        borderRight: `1px solid ${T.border}`,
+        display: "flex",
+        flexDirection: "column",
+        flexShrink: 0,
+        // Desktop: normal flex child. Mobile: absolutely-positioned slide-over.
+        position: isMobile ? "absolute" : "relative",
+        top: 0, bottom: 0, left: 0,
+        zIndex: isMobile ? 2500 : 10,
+        transform: isMobile && !sidebarOpen ? "translateX(-100%)" : "translateX(0)",
+        transition: "transform 0.22s ease",
+        boxShadow: isMobile && sidebarOpen ? "4px 0 24px rgba(0,0,0,0.5)" : "none",
+      }}>
 
         {/* Logo */}
         <div style={{ padding: "20px 20px 16px", borderBottom: `1px solid ${T.border}` }}>
@@ -935,6 +968,31 @@ export default function VoiceMap() {
 
       {/* ── Map ───────────────────────────────────────────────────── */}
       <div id="voicemap-container" style={{ flex: 1, position: "relative" }} />
+
+      {/* ── Mobile drawer toggle + backdrop ───────────────────────── */}
+      {isMobile && (
+        <button
+          onClick={() => setSidebarOpen((o) => !o)}
+          aria-label={sidebarOpen ? "Close menu" : "Open menu"}
+          style={{
+            position: "absolute", top: 20, left: 20, zIndex: 2600,
+            width: 40, height: 40, borderRadius: 8,
+            border: `1px solid ${T.border2}`, background: T.sidebar, color: T.text,
+            fontSize: 18, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontFamily: "'DM Sans', sans-serif",
+          }}
+        >
+          {sidebarOpen ? "×" : "☰"}
+        </button>
+      )}
+      {isMobile && sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 2400 }}
+          aria-hidden="true"
+        />
+      )}
 
       {/* ── Alerts button ─────────────────────────────────────────── */}
       <button
