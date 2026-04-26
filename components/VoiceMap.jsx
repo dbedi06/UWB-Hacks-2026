@@ -975,7 +975,7 @@ export default function VoiceMap() {
           onClick={() => setSidebarOpen((o) => !o)}
           aria-label={sidebarOpen ? "Close menu" : "Open menu"}
           style={{
-            position: "absolute", top: 20, left: 20, zIndex: 2600,
+            position: "absolute", top: "calc(20px + env(safe-area-inset-top, 0px))", left: "calc(20px + env(safe-area-inset-left, 0px))", zIndex: 2600,
             width: 40, height: 40, borderRadius: 8,
             border: `1px solid ${T.border2}`, background: T.sidebar, color: T.text,
             fontSize: 18, cursor: "pointer",
@@ -1000,7 +1000,7 @@ export default function VoiceMap() {
           if (!auth0User) { window.location.href = "/auth/login"; return; }
           setAlertsOpen(true);
         }}
-        style={{ position: "absolute", top: 20, right: 20, zIndex: 1000, background: T.sidebar, border: `1px solid ${T.border2}`, borderRadius: 8, color: T.text, fontSize: 13, fontWeight: 600, padding: "10px 18px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.3)", fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s" }}
+        style={{ position: "absolute", top: "calc(20px + env(safe-area-inset-top, 0px))", right: "calc(20px + env(safe-area-inset-right, 0px))", zIndex: 1000, background: T.sidebar, border: `1px solid ${T.border2}`, borderRadius: 8, color: T.text, fontSize: 13, fontWeight: 600, padding: "10px 18px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.3)", fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s" }}
         onMouseEnter={e => e.currentTarget.style.borderColor = "#3BBFA3"}
         onMouseLeave={e => e.currentTarget.style.borderColor = T.border2}
       >
@@ -1090,7 +1090,7 @@ export default function VoiceMap() {
           />
           <button
             onClick={() => setLightboxOpen(false)}
-            style={{ position: "absolute", top: 20, right: 20, background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, color: "#fff", fontSize: 18, cursor: "pointer", padding: "6px 12px", fontFamily: "'DM Sans', sans-serif" }}
+            style={{ position: "absolute", top: "calc(20px + env(safe-area-inset-top, 0px))", right: "calc(20px + env(safe-area-inset-right, 0px))", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, color: "#fff", fontSize: 18, cursor: "pointer", padding: "6px 12px", fontFamily: "'DM Sans', sans-serif" }}
           >
             ✕ Close
           </button>
