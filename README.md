@@ -1,6 +1,6 @@
 # VoiceMap
 
-#### By Leonid Kotok (leonikot@uw.edu), Abenezer Desta (masrjad@uw.edu), Jad Masri (aben3@uw.edu), and Dilshan Bedi (dbedi@uw.edu)
+#### By Leonid Kotok (leonikot@uw.edu), Abenezer Desta (aben3@uw.edu), Jad Masri (masrjad@uw.edu), and Dilshan Bedi (dbedi@uw.edu)
 
 > Voice your neighborhood's problems. We pin them on the map and alert nearby.
 
